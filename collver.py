@@ -3,10 +3,23 @@ from enum import Enum, auto
 from typing import Optional
 import subprocess
 import os
+import sys
 
 def run_echoed(cmd):
     print(f"[CMD] {' '.join(cmd)}")
     subprocess.run(cmd)
+
+class TT(Enum):
+    INT  = auto()
+    WORD = auto()
+
+@dataclass
+class Token:
+    typ   : TT
+    value : str | int
+    file  : str
+    row   : int
+    col   : int
 
 class OT(Enum):
     """Operation Types of words"""
@@ -21,10 +34,80 @@ class Intrinsic(Enum):
 @dataclass
 class Word:
     """A word (instruction) in Collver"""
-    typ: OT # Type of word
-    operand: Optional[int | Intrinsic] # Operand
+    typ     : OT
+    operand : Optional[int | Intrinsic]
 
-def compile_program(program: list[Word], out_file_path: str):
+def compiler_error(tok: Token, msg: str) -> None:
+    """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
+    print(f"{tok.file}:{tok.row+1}:{tok.col+1}:ERROR: {msg}")
+
+def lex_line(line: str) -> list[tuple[int, str]]:
+    """Lexes a line, returning a list of pairs (col, str)"""
+    # I realize that I could probably use split here, but I want to make it
+    # easier for me to just 1:1 translate this code int Collver when I self-
+    # host the language later (assuming I get that far before deleting the)
+    # project ;).
+    buffer = ""
+    start_idx = 0
+    chunks: list[tuple[int, str]] = []
+    for idx, c in enumerate(line):
+        if c == " " or c == "\n":
+            if len(buffer) != 0:
+                chunks.append((start_idx, buffer))
+                buffer = ""
+        else:
+            if len(buffer) == 0:
+                start_idx = idx
+                buffer = c
+            else:
+                buffer += c
+
+    if len(buffer) != 0:
+        chunks.append((start_idx, buffer))
+        buffer = ""
+    return chunks
+
+def lex_file(file_path) -> list[Token]:
+    """Lex a file, returning Tokens including the tokens location, type, and value"""
+    toks: list[Token] = []
+    with open(file_path, "r") as f:
+        for (row, line) in enumerate(f.readlines()):
+            for (col, string) in lex_line(line):
+                try:
+                    val = int(string)
+                    typ = TT.INT
+                except ValueError:
+                    val = string
+                    typ = TT.WORD
+                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col)
+                toks.append(tok)
+    return toks
+
+STR_TO_INTRINSIC: dict[str, Intrinsic] = {
+    "+": Intrinsic.PLUS,
+    "print": Intrinsic.PRINT,
+}
+
+def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
+    """Given a list of tokens, convert them into compile-able words"""
+    rtokens = list(reversed(tokens))
+    words = []
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.INT:
+            assert type(tok.value) == int, "INT token had non-int value"
+            words.append(Word(OT.PUSH_INT, int(tok.value)))
+        elif tok.typ == TT.WORD:
+            if tok.value in STR_TO_INTRINSIC:
+                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[tok.value]))
+            else:
+                compiler_error(tok, f"Unknown word `{tok.value}`")
+                sys.exit(1)
+
+    return words
+
+def compile_program(program: list[Word], out_file_path: str, bin_path: str):
+    """Compile a series of Words into an executable file using `clang`"""
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
@@ -76,21 +159,39 @@ def compile_program(program: list[Word], out_file_path: str):
         out.write("  ret i64 0\n")
         out.write("}\n")
 
-    print(f"[INFO] Compiling {out_file_path} to native binary")
-    run_echoed(["clang", out_file_path, "-o", os.path.splitext(out_file_path)[0]])
+    print(f"[INFO] Compiling `{out_file_path}` to native binary")
+    run_echoed(["clang", out_file_path, "-o", bin_path])
+    print(f"[INFO] Compiled source file to native binary at `{bin_path}`")
 
 def repr_program(program: list[Word]):
+    """Generate a pretty-printed string from a program"""
     return "[\n\t" + ",\n\t".join([str(i) for i in program]) + "\n]"
 
-def main():
-    program: list[Word] = [
-        Word(OT.PUSH_INT, 10),
-        Word(OT.PUSH_INT, 5),
-        Word(OT.INTRINSIC, Intrinsic.PLUS),
-        Word(OT.INTRINSIC, Intrinsic.PRINT),
-    ]
+def usage():
+    """Print a message on proper usage of the collver command"""
+    print("""
+USAGE: [python3.10] collver.py <filename> [flags]
+    Flags:
+        -r: Automatically run executable after compiling
+    """[1:-5]) # Chop off the initial \n, the final \n, and the 4 spaces at the end
 
-    compile_program(program, "program.ll")
+def main():
+    if len(sys.argv) < 2:
+        usage()
+        print("ERROR: Not enough arguments provided")
+        sys.exit(1)
+    else:
+        src_path = sys.argv[1]
+        exec_path = os.path.splitext(src_path)[0]
+        ll_path = exec_path + ".ll"
+    toks = lex_file(src_path)
+    program = parse_tokens_into_words(toks)
+    compile_program(program, ll_path, exec_path)
+    if not "/" in exec_path:
+        exec_path = os.path.join(".", exec_path)
+    if "-r" in sys.argv:
+        print(f"[INFO] Running `{exec_path}`")
+        subprocess.run([exec_path])
 
 if __name__ == '__main__':
     main()
