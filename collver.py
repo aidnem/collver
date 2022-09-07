@@ -36,6 +36,7 @@ class Intrinsic(Enum):
     MOD   = auto()
     SHL   = auto()
     SHR   = auto()
+    DUP   = auto()
     DROP  = auto()
     PRINT = auto()
 
@@ -93,6 +94,7 @@ def lex_file(file_path) -> list[Token]:
     return toks
 
 assert len(Intrinsic) == 9, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
+assert len(Intrinsic) == 10, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
 STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "+": Intrinsic.PLUS,
     "-": Intrinsic.MINUS,
@@ -101,6 +103,7 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "%": Intrinsic.MOD,
     "<<": Intrinsic.SHL,
     ">>": Intrinsic.SHR,
+    "dup": Intrinsic.DUP,
     "drop": Intrinsic.DROP,
     "print": Intrinsic.PRINT,
 }
@@ -127,7 +130,7 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
 def compile_program(program: list[Word], out_file_path: str, bin_path: str):
     """Compile a series of Words into an executable file using `clang`"""
     assert len(OT) == 2, "Exhaustive handling of Op Types in compile_program()"
-    assert len(Intrinsic) == 9, "Exhaustive handling of Intrincics in compile_program()"
+    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
@@ -202,6 +205,11 @@ def compile_program(program: list[Word], out_file_path: str, bin_path: str):
                     out.write(f"  %b{c} = call i64() @pop()\n")
                     out.write(f"  %c{c} = lshr i64 %b{c}, %a{c}\n")
                     out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                    c += 1
+                elif word.operand == Intrinsic.DUP:
+                    out.write(f"  %a{c} = call i64() @pop()\n")
+                    out.write(f"  call void(i64) @push(i64 %a{c})\n")
+                    out.write(f"  call void(i64) @push(i64 %a{c})\n")
                     c += 1
                 elif word.operand == Intrinsic.DROP:
                     out.write(f"  call i64() @pop()\n")
