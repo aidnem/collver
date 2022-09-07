@@ -69,6 +69,7 @@ def lex_line(line: str) -> list[tuple[int, str]]:
 
 def lex_file(file_path) -> list[Token]:
     """Lex a file, returning Tokens including the tokens location, type, and value"""
+    assert len(TT) == 2, "Exhaustive handling of Token Types in lex_file()"
     toks: list[Token] = []
     with open(file_path, "r") as f:
         for (row, line) in enumerate(f.readlines()):
@@ -90,6 +91,7 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
+    assert len(OT) == 2, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
     words = []
     while len(rtokens):
@@ -108,6 +110,8 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
 
 def compile_program(program: list[Word], out_file_path: str, bin_path: str):
     """Compile a series of Words into an executable file using `clang`"""
+    assert len(OT) == 2, "Exhaustive handling of Op Types in compile_program()"
+    assert len(Intrinsic) == 2, "Exhaustive handling of Intrincics in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
