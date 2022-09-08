@@ -30,9 +30,10 @@ class OT(Enum):
 
 class Keyword(Enum):
     """Keywords (words that aren't Intrinsics)"""
-    IF        = auto()
-    DO        = auto()
-    END       = auto()
+    IF   = auto()
+    DO   = auto()
+    ELSE = auto()
+    END  = auto()
 
 class Intrinsic(Enum):
     """Intrinsic words"""
@@ -103,10 +104,11 @@ def lex_file(file_path) -> list[Token]:
     return toks
 
 
-assert len(OT) == 3, "Exhaustive map of Words in STR_TO_KEYWORD"
+assert len(Keyword) == 4, "Exhaustive map of Words in STR_TO_KEYWORD"
 STR_TO_KEYWORD: dict[str, Keyword] = {
     "if": Keyword.IF,
     "do": Keyword.DO,
+    "else": Keyword.ELSE,
     "end": Keyword.END,
 }
 
@@ -149,6 +151,9 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
 
 def crossreference_program(program: list[Word]) -> None:
     """Given a program, set the correct index to jump to for control flow words"""
+    assert len(OT) == 3, "Exhaustive handling of Op Types in crossreference_program()"
+    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in crossreference_program()"
+    assert len(Keyword) == 4, "Exhaustive handling of Keywords in crossreference_program()"
     stack: list[int] = []
     for ip, word in enumerate(program):
         if word.typ == OT.KEYWORD:
@@ -156,12 +161,31 @@ def crossreference_program(program: list[Word]) -> None:
                 stack.append(ip)
             elif word.operand == Keyword.DO:
                 stack.append(ip)
+            elif word.operand == Keyword.ELSE:
+                try:
+                    do_ip = stack.pop()
+                    start_ip = stack.pop()
+                except IndexError:
+                    compiler_error(word.tok, "Word `else` with no start of block")
+                    sys.exit(1)
+
+                start_word = program[start_ip]
+                if start_word.operand == Keyword.IF:
+                    word.jmp = ip
+                else:
+                    compiler_error(word.tok, "Word `else` can only close `if` block")
+                    sys.exit(1)
+
+                program[do_ip].jmp = ip
+
+                stack.append(start_ip)
+                stack.append(ip)
             elif word.operand == Keyword.END:
                 try:
                     do_ip = stack.pop()
                     start_ip = stack.pop()
                 except IndexError:
-                    compiler_error(word.tok, "Word `end` with no start")
+                    compiler_error(word.tok, "Word `end` with no start of block")
                     sys.exit(1)
 
                 start_word = program[start_ip]
@@ -170,7 +194,7 @@ def crossreference_program(program: list[Word]) -> None:
                 else:
                     assert False, f"Unknown start of `end` block {start_word}"
 
-                program[do_ip].operand = ip
+                program[do_ip].jmp = ip
 
     if len(stack) != 0:
       compiler_error(program[stack.pop()].tok, f"Unclosed block")
@@ -181,7 +205,7 @@ def compile_program(program: list[Word], out_file_path: str, bin_path: str):
     """Compile a series of Words into an executable file using `clang`"""
     assert len(OT) == 3, "Exhaustive handling of Op Types in compile_program()"
     assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
-    assert len(Keyword) == 3, "Exhaustive handling of Keywords in compile_program()"
+    assert len(Keyword) == 4, "Exhaustive handling of Keywords in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
@@ -224,6 +248,9 @@ def compile_program(program: list[Word], out_file_path: str, bin_path: str):
                     out.write(f"  br i1 %b{c}, label %l{ip}, label %l{word.jmp}\n")
                     out.write(f"l{ip}:\n") # Label to jump to if true
                     c += 1
+                elif word.operand == Keyword.ELSE:
+                    out.write(f"  br label %l{word.jmp}\n")
+                    out.write(f"l{ip}:\n")
                 elif word.operand == Keyword.END:
                     out.write(f"  br label %l{word.jmp}\n")
                     out.write(f"l{ip}:\n")
