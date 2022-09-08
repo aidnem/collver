@@ -16,16 +16,20 @@ class TT(Enum):
 
 @dataclass
 class Token:
-    typ   : TT
-    value : str | int
-    file  : str
-    row   : int
-    col   : int
+    typ   : TT        # Token type (word or different values)
+    value : str | int # Value (word str or int value)
+    file  : str       # File that the token originated in
+    row   : int       # Row that the token is on (0 indexed)
+    col   : int       # Row that the token is on (0 indexed)
 
 class OT(Enum):
     """Operation Types of words"""
     PUSH_INT  = auto()
+    KEYWORD   = auto()
     INTRINSIC = auto()
+
+class Keyword(Enum):
+    """Keywords (words that aren't Intrinsics)"""
     IF        = auto()
     DO        = auto()
     END       = auto()
@@ -46,9 +50,10 @@ class Intrinsic(Enum):
 @dataclass
 class Word:
     """A word (instruction) in Collver"""
-    typ     : OT
-    operand : Optional[int | Intrinsic]
-    tok     : Token
+    typ     : OT                                  # Type of token (for different syntaxes)
+    operand : Optional[int | Intrinsic | Keyword] # Value or type of keyword/intrinsic
+    tok     : Token                               # Token that the word was derived from
+    jmp     : Optional[int]                       # Jump location for control flow words
 
 def compiler_error(tok: Token, msg: str) -> None:
     """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
@@ -97,6 +102,14 @@ def lex_file(file_path) -> list[Token]:
                 toks.append(tok)
     return toks
 
+
+assert len(OT) == 3, "Exhaustive map of Words in STR_TO_KEYWORD"
+STR_TO_KEYWORD: dict[str, Keyword] = {
+    "if": Keyword.IF,
+    "do": Keyword.DO,
+    "end": Keyword.END,
+}
+
 assert len(Intrinsic) == 10, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
 STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "+": Intrinsic.PLUS,
@@ -110,28 +123,22 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "drop": Intrinsic.DROP,
     "print": Intrinsic.PRINT,
 }
-assert len(OT) == 5, "Exhaustive map of Words in STR_TO_OT"
-STR_TO_OT: dict[str, OT] = {
-    "if": OT.IF,
-    "do": OT.DO,
-    "end": OT.END,
-}
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
-    assert len(OT) == 5, "Exhaustive handling of Op Types in parse_tokens_into_words()"
+    assert len(OT) == 3, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
     words = []
     while len(rtokens):
         tok = rtokens.pop()
         if tok.typ == TT.INT:
             assert type(tok.value) == int, "INT token had non-int value"
-            words.append(Word(OT.PUSH_INT, int(tok.value), tok))
+            words.append(Word(OT.PUSH_INT, int(tok.value), tok, None))
         elif tok.typ == TT.WORD:
-            if tok.value in STR_TO_OT:
-                words.append(Word(STR_TO_OT[tok.value], None, tok))
+            if tok.value in STR_TO_KEYWORD:
+                words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[tok.value], tok, None))
             elif tok.value in STR_TO_INTRINSIC:
-                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[tok.value], tok))
+                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[tok.value], tok, None))
             else:
                 compiler_error(tok, f"Unknown word `{tok.value}`")
                 sys.exit(1)
@@ -144,25 +151,26 @@ def crossreference_program(program: list[Word]) -> None:
     """Given a program, set the correct index to jump to for control flow words"""
     stack: list[int] = []
     for ip, word in enumerate(program):
-        if word.typ == OT.IF:
-            stack.append(ip)
-        elif word.typ == OT.DO:
-            stack.append(ip)
-        elif word.typ == OT.END:
-            try:
-                do_ip = stack.pop()
-                start_ip = stack.pop()
-            except IndexError:
-                compiler_error(word.tok, "Word `end` with no start")
-                sys.exit(1)
+        if word.typ == OT.KEYWORD:
+            if word.operand == Keyword.IF:
+                stack.append(ip)
+            elif word.operand == Keyword.DO:
+                stack.append(ip)
+            elif word.operand == Keyword.END:
+                try:
+                    do_ip = stack.pop()
+                    start_ip = stack.pop()
+                except IndexError:
+                    compiler_error(word.tok, "Word `end` with no start")
+                    sys.exit(1)
 
-            start_word = program[start_ip]
-            if start_word.typ == OT.IF:
-                word.operand = ip
-            else:
-                assert False, f"Unknown start of `end` block {start_word}"
+                start_word = program[start_ip]
+                if start_word.operand == Keyword.IF:
+                    word.jmp = ip
+                else:
+                    assert False, f"Unknown start of `end` block {start_word}"
 
-            program[do_ip].operand = ip
+                program[do_ip].operand = ip
 
     if len(stack) != 0:
       compiler_error(program[stack.pop()].tok, f"Unclosed block")
@@ -171,8 +179,9 @@ def crossreference_program(program: list[Word]) -> None:
 
 def compile_program(program: list[Word], out_file_path: str, bin_path: str):
     """Compile a series of Words into an executable file using `clang`"""
-    assert len(OT) == 5, "Exhaustive handling of Op Types in compile_program()"
+    assert len(OT) == 3, "Exhaustive handling of Op Types in compile_program()"
     assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
+    assert len(Keyword) == 3, "Exhaustive handling of Keywords in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
@@ -204,19 +213,20 @@ def compile_program(program: list[Word], out_file_path: str, bin_path: str):
             if word.typ == OT.PUSH_INT:
                 assert type(word.operand) == int, "PUSH_INT word has non-int type"
                 out.write(f"  call void(i32) @push(i32 {word.operand})\n")
-            elif word.typ == OT.IF:
-                pass
-            elif word.typ == OT.DO:
-                out.write(f"  %a{c} = call i32() @pop()\n")
-                # Compare number with 0 (true if a{n} != 0)
-                out.write(f"  %b{c} = icmp ne i32 %a{c}, 0\n")
-                # Jump to right in front if true, or `end` if false
-                out.write(f"  br i1 %b{c}, label %l{ip}, label %l{word.operand}\n")
-                out.write(f"l{ip}:\n") # Label to jump to if true
-                c += 1
-            elif word.typ == OT.END:
-                out.write(f"  br label %l{word.operand}\n")
-                out.write(f"l{ip}:\n")
+            elif word.typ == OT.KEYWORD:
+                if word.operand == Keyword.IF:
+                    pass
+                elif word.operand == Keyword.DO:
+                    out.write(f"  %a{c} = call i32() @pop()\n")
+                    # Compare number with 0 (true if a{n} != 0)
+                    out.write(f"  %b{c} = icmp ne i32 %a{c}, 0\n")
+                    # Jump to right in front if true, or `end` if false
+                    out.write(f"  br i1 %b{c}, label %l{ip}, label %l{word.jmp}\n")
+                    out.write(f"l{ip}:\n") # Label to jump to if true
+                    c += 1
+                elif word.operand == Keyword.END:
+                    out.write(f"  br label %l{word.jmp}\n")
+                    out.write(f"l{ip}:\n")
             elif word.typ == OT.INTRINSIC:
                 assert type(word.operand) == Intrinsic, "Intrinsic word has non-intrinsic type"
                 if word.operand == Intrinsic.PLUS:
@@ -308,7 +318,7 @@ def main():
         ll_path = exec_path + ".ll"
     toks = lex_file(src_path)
     program = parse_tokens_into_words(toks)
-    print(repr_program(program))
+    # print(repr_program(program))
     crossreference_program(program)
     compile_program(program, ll_path, exec_path)
     if not "/" in exec_path:
