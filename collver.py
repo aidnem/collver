@@ -58,7 +58,7 @@ class Word:
 
 def compiler_error(tok: Token, msg: str) -> None:
     """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
-    print(f"{tok.file}:{tok.row+1}:{tok.col+1}:ERROR: {msg}")
+    print(f"{tok.file}:{tok.row+1}:{tok.col+1}:ERROR: {msg}", file=sys.stderr)
 
 def lex_line(line: str) -> list[tuple[int, str]]:
     """Lexes a line, returning a list of pairs (col, str)"""
