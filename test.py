@@ -155,12 +155,15 @@ def test_specfile(fp: str) -> list[Problem]:
 
 def find_specfiles() -> list[str]:
     """Find specfiles in the ./tests/ folder"""
-    return [str(g) for g in glob.glob("./tests/*.cts")]
+    specs = [str(g) for g in glob.glob("./tests/*.cts")]
+    print(f"==> Found {len(specs)} spec(s)")
+    return specs
 
 def main():
     specs = find_specfiles()
     probs = []
     for spec in specs:
+        print(f"=> Testing spec `{spec}`")
         probs.extend(test_specfile(spec))
 
     if len(probs) == 0:
