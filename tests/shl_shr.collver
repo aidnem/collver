@@ -1,0 +1,2 @@
+1 6 << dup print
+  1 >> dup print
