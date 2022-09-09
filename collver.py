@@ -201,8 +201,8 @@ def crossreference_program(program: list[Word]) -> None:
       print(stack)
       sys.exit(1)
 
-def compile_program(program: list[Word], out_file_path: str, bin_path: str):
-    """Compile a series of Words into an executable file using `clang`"""
+def compile_program_to_ll(program: list[Word], out_file_path: str):
+    """Compile a series of Words into an llvm IR file (.ll)"""
     assert len(OT) == 3, "Exhaustive handling of Op Types in compile_program()"
     assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
     assert len(Keyword) == 4, "Exhaustive handling of Keywords in compile_program()"
@@ -318,41 +318,61 @@ def compile_program(program: list[Word], out_file_path: str, bin_path: str):
         out.write("  ret i32 0\n")
         out.write("}\n")
 
-    print(f"[INFO] Compiling `{out_file_path}` to native binary")
-    run_echoed(["clang", out_file_path, "-o", bin_path])
+def compile_ll_to_bin(ll_path: str, bin_path: str):
+    print(f"[INFO] Compiling `{ll_path}` to native binary")
+    run_echoed(["clang", ll_path, "-o", bin_path])
     print(f"[INFO] Compiled source file to native binary at `{bin_path}`")
 
 def repr_program(program: list[Word]):
     """Generate a pretty-printed string from a program"""
     return "[\n\t" + ",\n\t".join([str(i) for i in program]) + "\n]"
 
+COMMANDS = ["com", "to-ll", "from-ll"]
 def usage():
     """Print a message on proper usage of the collver command"""
     print("""
-USAGE: [python3.10] collver.py <filename> [flags]
+USAGE: [python3.10] collver.py <subcommand> <filename> [flags]
+    Subcommands:
+        com: Compile a source (.collver) file to a binary executable (using clang)
+        to-ll: Compile a source (.collver) file to llvm assembly/IR (without calling clang)
+        from-ll: Compile an llvm IR (.ll) file to a binary executable (using clang)
     Flags:
-        -r: Automatically run executable after compiling
+        -r: Automatically run executable after compiling (only applicable for `com` command)
     """[1:-5]) # Chop off the initial \n, the final \n, and the 4 spaces at the end
 
 def main():
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 3:
         usage()
-        print("ERROR: Not enough arguments provided")
+        print("ERROR: Not enough arguments provided", file=sys.stderr)
         sys.exit(1)
     else:
-        src_path = sys.argv[1]
+        command = sys.argv[1]
+        if command not in COMMANDS:
+            usage()
+            print(f"ERROR: Unknown subcommand {command}", file=sys.stderr)
+            sys.exit(1)
+        src_path = sys.argv[2]
         exec_path = os.path.splitext(src_path)[0]
         ll_path = exec_path + ".ll"
-    toks = lex_file(src_path)
-    program = parse_tokens_into_words(toks)
-    # print(repr_program(program))
-    crossreference_program(program)
-    compile_program(program, ll_path, exec_path)
-    if not "/" in exec_path:
-        exec_path = os.path.join(".", exec_path)
-    if "-r" in sys.argv:
-        print(f"[INFO] Running `{exec_path}`")
-        subprocess.run([exec_path])
+    if command != "from-ll":
+        try:
+            toks = lex_file(src_path)
+        except FileNotFoundError:
+            print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
+            sys.exit(1)
+
+        program = parse_tokens_into_words(toks)
+        # print(repr_program(program))
+        crossreference_program(program)
+
+        compile_program_to_ll(program, ll_path)
+    if command in ("com", "from-ll"):
+        compile_ll_to_bin(ll_path, exec_path)
+        if not "/" in exec_path:
+            exec_path = os.path.join(".", exec_path)
+        if "-r" in sys.argv:
+            print(f"[INFO] Running `{exec_path}`")
+            subprocess.run([exec_path])
 
 if __name__ == '__main__':
     main()
