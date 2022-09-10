@@ -6,7 +6,8 @@ import subprocess
 @dataclass
 class TestSpec:
     """A collver Test Specification, containing input and expected outputs"""
-    file_path: str # Path to the test spec file
+    spec_path: str
+    file_path: str
     compiler_stderr: bytes
     provided_input: str
     expected_stdout: bytes
@@ -43,7 +44,7 @@ def eat_chunk(rlines: list[str]) -> str:
 
 def parse_spec(spec_path: str) -> TestSpec:
     """Parse a test spec file into a text spec object"""
-    spec = TestSpec("", b"", "", b"", b"")
+    spec = TestSpec(spec_path, "", b"", "", b"", b"")
     with open(spec_path, "r") as f:
         lines = f.readlines()
 
@@ -67,11 +68,13 @@ def parse_spec(spec_path: str) -> TestSpec:
     return spec
 
 def run_echoed(cmd: list[str], print_outs: bool=False):
-    print(f"[test.py] {'' if print_outs else '[silenced] ' }$ {' '.join(cmd)}")
+    print(f" {'' if print_outs else '(silenced) ' }$ {' '.join(cmd)}")
     run_res = subprocess.run(cmd, capture_output=True)
     if print_outs:
-        print("=> STDOUT:\n"+ run_res.stdout.decode("utf-8") + "\n<<")
-        print("=> STDERR:\n"+ run_res.stderr.decode("utf-8") + "\n<<")
+        out = run_res.stdout.decode("utf-8")
+        err = run_res.stderr.decode("utf-8")
+        print(f"=> STDOUT:\n"+ out)
+        print(f"=> STDERR:\n"+ err)
 
     return run_res
 
@@ -88,21 +91,23 @@ def run_spec(spec: TestSpec) -> TestResult:
 @dataclass
 class Problem:
     """A problem (failed test)"""
+    specpath: str # Path to the specfile
     field: str    # Name of what didn't match
     expected: str # What was expected
     actual: str   # The actual value
 
 def print_problem(prob: Problem):
-    print(f"[test.py] FAILURE: {prob.field} didn't match!")
-    print("=> Expected:\n"+ prob.expected)
-    print("=> Actual:\n"+ prob.actual)
+    print(f"Spec {prob.specpath}: {prob.field} didn't match!")
+    print(f">> Expected:\n"+ prob.expected)
+    print(f">> Actual:\n"+ prob.actual)
 
 
-def check_match(fn: str, fieldname: str, expected: str, actual: str) -> list[Problem]:
+def check_match(sn: str, fieldname: str, expected: str, actual: str) -> list[Problem]:
     if expected != actual:
         return [
             Problem(
-                f"`{fieldname}` for file `{fn}`",
+                sn,
+                f"`{fieldname}`",
                 expected,
                 actual,
             )
@@ -113,7 +118,7 @@ def check_match(fn: str, fieldname: str, expected: str, actual: str) -> list[Pro
 
 def test_output(res: TestResult) -> list[Problem]:
     probs: list[Problem] = []
-    basename = os.path.basename(res.test_spec.file_path)
+    basename = os.path.basename(res.test_spec.spec_path)
     # -- Compiler stderr --
     probs.extend(
         check_match(
@@ -163,15 +168,12 @@ def main():
     specs = find_specfiles()
     probs = []
     for spec in specs:
-        print(f"=> Testing spec `{spec}`")
+        print(f"> Testing spec `{spec}`")
         probs.extend(test_specfile(spec))
 
-    if len(probs) == 0:
-        print(f"==> Success! {len(specs)} spec(s) tested; 0 failed")
-    else:
-        print(f"==>Failure: Of {len(specs)} spec(s), {len(probs)} test(s) failed:")
-        for prob in probs:
-            print_problem(prob)
+    print(f"==> {len(specs)} spec(s) tested; {len(probs)} failed")
+    for prob in probs:
+        print_problem(prob)
 
 if __name__ == '__main__':
     main()
