@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
+import copy
 import subprocess
 import os
 import sys
@@ -16,11 +17,12 @@ class TT(Enum):
 
 @dataclass
 class Token:
-    typ   : TT        # Token type (word or different values)
-    value : str | int # Value (word str or int value)
-    file  : str       # File that the token originated in
-    row   : int       # Row that the token is on (0 indexed)
-    col   : int       # Row that the token is on (0 indexed)
+    typ   : TT                   # Token type (word or different values)
+    value : str | int            # Value (word str or int value)
+    file  : str                  # File that the token originated in
+    row   : int                  # Row that the token is on (0 indexed)
+    col   : int                  # Row that the token is on (0 indexed)
+    expanded_from: list['Token'] # List of macro name tokens that this token has been expanded from
 
 class OT(Enum):
     """Operation Types of words"""
@@ -57,9 +59,17 @@ class Word:
     tok     : Token                               # Token that the word was derived from
     jmp     : Optional[int]                       # Jump location for control flow words
 
+def pretty_loc(tok: Token) -> str:
+    """Given a token, return a human-readable string containing its location"""
+    return f"{tok.file}:{tok.row+1}:{tok.col+1}"
+
 def compiler_error(tok: Token, msg: str) -> None:
     """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
-    print(f"{tok.file}:{tok.row+1}:{tok.col+1}:ERROR: {msg}", file=sys.stderr)
+    print(f"{pretty_loc(tok)}:ERROR: {msg}", file=sys.stderr)
+
+def compiler_note(tok: Token, msg: str) -> None:
+    """Print a note at a location, DOES NOT EXIT AUTOMATICALLY"""
+    print(f"{pretty_loc(tok)}:NOTE: {msg}", file=sys.stderr)
 
 def lex_line(line: str) -> list[tuple[int, str]]:
     """Lexes a line, returning a list of pairs (col, str)"""
@@ -100,7 +110,7 @@ def lex_file(file_path) -> list[Token]:
                 except ValueError:
                     val = string
                     typ = TT.WORD
-                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col)
+                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col, expanded_from=[])
                 toks.append(tok)
     return toks
 
@@ -127,6 +137,93 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "drop": Intrinsic.DROP,
     "print": Intrinsic.PRINT,
 }
+
+def extract_macros(tokens: list[Token]) -> tuple[dict[str, list[Token]], list[Token]]:
+    """Extract macro definitions and return the defined macros and new tokens"""
+    rtokens = list(reversed(tokens))
+    macros: dict[str, list[Token]] = {}
+    new_tokens: list[Token] = []
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.WORD and tok.value == "macro":
+            if len(rtokens):
+                name_tok = rtokens.pop()
+            else:
+                compiler_error(tok, "Malformed macro definition")
+                sys.exit(1)
+
+            if name_tok.typ != TT.WORD:
+                compiler_error(name_tok, "Expected token of type `word` for macro name")
+                sys.exit(1)
+
+
+            body_toks = []
+            body_tok: Optional[Token] = None
+            while len(rtokens):
+                body_tok = rtokens.pop()
+                if body_tok.typ == TT.WORD and body_tok.value == "end":
+                    break
+                if body_tok.typ == TT.WORD and body_tok.value == name_tok.value:
+                    compiler_error(body_tok, f"Recursive definition of macro `{name_tok.value}`")
+                body_toks.append(body_tok)
+
+            if body_tok is None:
+                compiler_error(name_tok, "Expected macro body or `end` word, found EOF")
+                sys.exit(1)
+            elif body_tok.typ != TT.WORD or body_tok.value != "end":
+                compiler_error(body_tok, "Expected `end` word to close macro definition, found EOF")
+                sys.exit(1)
+
+            assert type(name_tok.value) == str, "`word` token with non-str value"
+            macros[str(name_tok.value)] = body_toks
+        else:
+            new_tokens.append(tok)
+
+    return macros, new_tokens
+
+def check_macros(macros: dict[str, list[Token]], tokens: list[Token]) -> bool:
+    """Check whether or not a series of tokens contains any un-expanded macro references"""
+    for tok in tokens:
+        if tok.typ == TT.WORD and tok.value in macros:
+            return True
+
+    return False
+
+def expand_macros(macros: dict[str, list[Token]], tokens: list[Token]) -> list[Token]:
+    """Expand references to macros and return the new, expanded set of tokens"""
+    new_tokens: list[Token] = []
+    for token in tokens:
+        if token.typ == TT.WORD and token.value in macros:
+            expanded = copy.deepcopy(macros[token.value])
+            for etok in token.expanded_from:
+                if token.file == etok.file and token.row == etok.row and token.file == etok.file:
+                    compiler_error(token, "Cyclic macro reference")
+                    for etok in token.expanded_from:
+                        compiler_note(etok, "Expanded from here")
+                    sys.exit(1)
+
+            for tok in expanded:
+                tok.expanded_from.append(token)
+                tok.expanded_from.extend(token.expanded_from)
+            new_tokens.extend(expanded)
+        else:
+            new_tokens.append(token)
+
+    return new_tokens
+
+
+def preprocess_macros(tokens: list[Token]) -> list[Token]:
+    """Given a list of tokens, extract macro definitions and expand macro references"""
+    macros: dict[str, list[Token]] = {}
+    macros, tokens = extract_macros(tokens)
+    c = 0
+    while check_macros(macros, tokens) and c < 10:
+        tokens = expand_macros(macros, tokens)
+        c += 1
+
+    for tok in tokens:
+        print(tok)
+    return tokens
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
@@ -396,6 +493,7 @@ def main():
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
+        toks = preprocess_macros(toks)
         program = parse_tokens_into_words(toks)
         # print(repr_program(program))
         crossreference_program(program)
