@@ -31,6 +31,7 @@ class OT(Enum):
 class Keyword(Enum):
     """Keywords (words that aren't Intrinsics)"""
     IF   = auto()
+    ELIF   = auto()
     DO   = auto()
     ELSE = auto()
     END  = auto()
@@ -104,9 +105,10 @@ def lex_file(file_path) -> list[Token]:
     return toks
 
 
-assert len(Keyword) == 4, "Exhaustive map of Words in STR_TO_KEYWORD"
+assert len(Keyword) == 5, "Exhaustive map of Words in STR_TO_KEYWORD"
 STR_TO_KEYWORD: dict[str, Keyword] = {
     "if": Keyword.IF,
+    "elif": Keyword.ELIF,
     "do": Keyword.DO,
     "else": Keyword.ELSE,
     "end": Keyword.END,
@@ -153,11 +155,30 @@ def crossreference_program(program: list[Word]) -> None:
     """Given a program, set the correct index to jump to for control flow words"""
     assert len(OT) == 3, "Exhaustive handling of Op Types in crossreference_program()"
     assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in crossreference_program()"
-    assert len(Keyword) == 4, "Exhaustive handling of Keywords in crossreference_program()"
+    assert len(Keyword) == 5, "Exhaustive handling of Keywords in crossreference_program()"
     stack: list[int] = []
     for ip, word in enumerate(program):
         if word.typ == OT.KEYWORD:
             if word.operand == Keyword.IF:
+                stack.append(ip)
+            elif word.operand == Keyword.ELIF:
+                try:
+                    do_ip = stack.pop()
+                    start_ip = stack.pop()
+                except IndexError:
+                    compiler_error(word.tok, "Word `elif` with no start of block")
+                    sys.exit(1)
+
+                start_word = program[start_ip]
+                if start_word.operand == Keyword.IF:
+                    program[do_ip].jmp = ip
+                elif start_word.operand == Keyword.ELIF:
+                    program[do_ip].jmp = ip
+                    start_word.jmp = ip # Make the elif's jump to each other to skip if true
+                else:
+                    compiler_error(word.tok, "Word `elif` can only close `(el)if ... do` block")
+                    sys.exit(1)
+
                 stack.append(ip)
             elif word.operand == Keyword.DO:
                 stack.append(ip)
@@ -170,10 +191,10 @@ def crossreference_program(program: list[Word]) -> None:
                     sys.exit(1)
 
                 start_word = program[start_ip]
-                if start_word.operand == Keyword.IF:
+                if start_word.operand == Keyword.IF or start_word.operand == Keyword.ELIF:
                     word.jmp = ip
                 else:
-                    compiler_error(word.tok, "Word `else` can only close `if` block")
+                    compiler_error(word.tok, "Word `else` can only close `(el)if ... do` block")
                     sys.exit(1)
 
                 program[do_ip].jmp = ip
@@ -191,8 +212,13 @@ def crossreference_program(program: list[Word]) -> None:
                 start_word = program[start_ip]
                 if start_word.operand == Keyword.IF:
                     word.jmp = ip
+                elif start_word.operand == Keyword.ELIF:
+                    print("I found it")
+                    word.jmp = ip
+                    start_word.jmp = ip
                 else:
-                    assert False, f"Unknown start of `end` block {start_word}"
+                    compiler_error(word.tok, "Word `end` can only close `(el)if ... do` block")
+                    sys.exit(1)
 
                 program[do_ip].jmp = ip
 
@@ -205,7 +231,7 @@ def compile_program_to_ll(program: list[Word], out_file_path: str):
     """Compile a series of Words into an llvm IR file (.ll)"""
     assert len(OT) == 3, "Exhaustive handling of Op Types in compile_program()"
     assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
-    assert len(Keyword) == 4, "Exhaustive handling of Keywords in compile_program()"
+    assert len(Keyword) == 5, "Exhaustive handling of Keywords in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         # Push and pop operations
@@ -240,6 +266,11 @@ def compile_program_to_ll(program: list[Word], out_file_path: str):
             elif word.typ == OT.KEYWORD:
                 if word.operand == Keyword.IF:
                     pass
+                elif word.operand == Keyword.ELIF:
+                    out.write(f"  br label %ls{ip}\n") # So that LLVM thinks the block is 'closed'
+                    out.write(f"ls{ip}:\n") # Label to jump to from previous (el)if
+                    out.write(f"  br label %ls{word.jmp}\n") # Jump to the end if we hit the elif
+                    out.write(f"l{ip}:\n") # Label to jump to from previous (el)if
                 elif word.operand == Keyword.DO:
                     out.write(f"  %a{c} = call i32() @pop()\n")
                     # Compare number with 0 (true if a{n} != 0)
@@ -254,6 +285,10 @@ def compile_program_to_ll(program: list[Word], out_file_path: str):
                 elif word.operand == Keyword.END:
                     out.write(f"  br label %l{word.jmp}\n")
                     out.write(f"l{ip}:\n")
+                    out.write(f"  br label %ls{ip}\n") # 'Close' the block for llvm
+                    out.write(f"ls{ip}:\n") # Skip label
+                else:
+                    assert False, f"Unknown keyword {word}"
             elif word.typ == OT.INTRINSIC:
                 assert type(word.operand) == Intrinsic, "Intrinsic word has non-intrinsic type"
                 if word.operand == Intrinsic.PLUS:

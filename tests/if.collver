@@ -9,3 +9,13 @@ if 0 do
 else
   4 print
 end
+
+if 0 do
+  5 print
+elif 0 do
+  6 print
+elif 1 do
+  7 print
+else
+  8 print
+end
