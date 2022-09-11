@@ -220,9 +220,6 @@ def preprocess_macros(tokens: list[Token]) -> list[Token]:
     while check_macros(macros, tokens) and c < 10:
         tokens = expand_macros(macros, tokens)
         c += 1
-
-    for tok in tokens:
-        print(tok)
     return tokens
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
