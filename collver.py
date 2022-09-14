@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from io import TextIOWrapper
 from typing import Optional
 import copy
 import subprocess
@@ -28,12 +29,15 @@ class OT(Enum):
     """Operation Types of words"""
     PUSH_INT  = auto()
     KEYWORD   = auto()
+    PROC_NAME = auto()
+    PROC_CALL = auto()
     INTRINSIC = auto()
 
 class Keyword(Enum):
     """Keywords (words that aren't Intrinsics)"""
+    PROC = auto()
     IF   = auto()
-    ELIF   = auto()
+    ELIF = auto()
     DO   = auto()
     ELSE = auto()
     END  = auto()
@@ -54,10 +58,10 @@ class Intrinsic(Enum):
 @dataclass
 class Word:
     """A word (instruction) in Collver"""
-    typ     : OT                                  # Type of token (for different syntaxes)
-    operand : Optional[int | Intrinsic | Keyword] # Value or type of keyword/intrinsic
-    tok     : Token                               # Token that the word was derived from
-    jmp     : Optional[int]                       # Jump location for control flow words
+    typ     : OT                                        # Type of token (for different syntaxes)
+    operand : Optional[int | str | Intrinsic | Keyword] # Value or type of keyword/intrinsic
+    tok     : Token                                     # Token that the word was derived from
+    jmp     : Optional[int]                             # Jump location for control flow words
 
 def pretty_loc(tok: Token) -> str:
     """Given a token, return a human-readable string containing its location"""
@@ -115,8 +119,9 @@ def lex_file(file_path) -> list[Token]:
     return toks
 
 
-assert len(Keyword) == 5, "Exhaustive map of Words in STR_TO_KEYWORD"
+assert len(Keyword) == 6, "Exhaustive map of Words in STR_TO_KEYWORD"
 STR_TO_KEYWORD: dict[str, Keyword] = {
+    "proc": Keyword.PROC,
     "if": Keyword.IF,
     "elif": Keyword.ELIF,
     "do": Keyword.DO,
@@ -222,11 +227,18 @@ def preprocess_macros(tokens: list[Token]) -> list[Token]:
         c += 1
     return tokens
 
+@dataclass
+class Program:
+    """A program in intermediate representation"""
+    file_path: str
+    procs: dict[str, list[Word]]
+
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
-    assert len(OT) == 3, "Exhaustive handling of Op Types in parse_tokens_into_words()"
+    assert len(OT) == 5, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
-    words = []
+    words: list[Word] = []
+    proc_names: list[str] = []
     while len(rtokens):
         tok = rtokens.pop()
         if tok.typ == TT.INT:
@@ -237,6 +249,15 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
                 words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[tok.value], tok, None))
             elif tok.value in STR_TO_INTRINSIC:
                 words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[tok.value], tok, None))
+            elif words[-1].operand == Keyword.PROC:
+                if tok.typ == TT.WORD:
+                    words.append(Word(OT.PROC_NAME, tok.value, tok, None))
+                    proc_names.append(str(tok.value))
+                else:
+                    compiler_error(tok, "Expected name of proc")
+                    sys.exit(1)
+            elif tok.value in proc_names:
+                    words.append(Word(OT.PROC_CALL, tok.value, tok, None))
             else:
                 compiler_error(tok, f"Unknown word `{tok.value}`")
                 sys.exit(1)
@@ -245,11 +266,55 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
 
     return words
 
-def crossreference_program(program: list[Word]) -> None:
-    """Given a program, set the correct index to jump to for control flow words"""
-    assert len(OT) == 3, "Exhaustive handling of Op Types in crossreference_program()"
-    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in crossreference_program()"
-    assert len(Keyword) == 5, "Exhaustive handling of Keywords in crossreference_program()"
+assert len(Keyword) == 6, "Exhaustive list of control flow words for BLOCK_STARTERS"
+BLOCK_STARTERS: list[Keyword] = [
+    Keyword.IF,
+]
+def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
+    """Parse a series of words into a Program() object"""
+    program = Program(file_path, {})
+    rwords = list(reversed(words))
+    buf: list[Word] = []
+    nesting_depth = 0
+    while len(rwords):
+        word = rwords.pop()
+        if word.operand != Keyword.PROC:
+            print(word)
+            compiler_error(word.tok, f"Expected `proc` keyword")
+            sys.exit(1)
+        if len(rwords):
+            name_word = rwords.pop()
+            assert name_word.typ == OT.PROC_NAME, "`proc` keyword followed by non-proc_name word (compiler bug)"
+        else:
+            compiler_error(word.tok, f"Expected name of proc, found nothing")
+            sys.exit(1)
+
+        while len(rwords):
+            word = rwords.pop()
+            if word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
+                nesting_depth += 1
+            elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
+                if nesting_depth:
+                    nesting_depth -= 1
+                else:
+                    break
+            buf.append(word)
+
+        if word.operand != Keyword.END:
+            compiler_error(word.tok, f"Expected `end` keyword at end of proc, found nothing")
+            sys.exit(1)
+
+        program.procs[str(name_word.operand)] = buf
+        buf = []
+
+    return program
+
+
+def crossreference_proc(program: list[Word]) -> None:
+    """Given a set of words, set the correct index to jump to for control flow words"""
+    assert len(OT) == 5, "Exhaustive handling of Op Types in crossreference_proc()"
+    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in crossreference_proc()"
+    assert len(Keyword) == 6, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(program):
         if word.typ == OT.KEYWORD:
@@ -321,131 +386,167 @@ def crossreference_program(program: list[Word]) -> None:
       print(stack)
       sys.exit(1)
 
-def compile_program_to_ll(program: list[Word], out_file_path: str):
+def compile_push_pop_functions(out: TextIOWrapper):
+    """Write the LLVM IR for the push and pop functions to an open()ed file"""
+    out.write("@stack = global [1024 x i32] undef\n")
+    out.write("@sp    = global i32 0\n")
+    out.write("define void @push(i32 %val) {\n")
+    out.write("  %sp = load i32, i32* @sp\n")
+    out.write("  %addr = getelementptr [1024 x i32], [1024 x i32]* @stack, i32 0, i32 %sp\n")
+    out.write("  store i32 %val, i32* %addr\n")
+    out.write("  %newsp = add i32 %sp, 1\n")
+    out.write("  store i32 %newsp, i32* @sp\n")
+    out.write("  ret void\n")
+    out.write("}\n")
+    out.write("define i32 @pop() {\n")
+    out.write("  %sp = load i32, i32* @sp\n")
+    out.write("  %topsp = sub i32 %sp, 1\n")
+    out.write("  %addr = getelementptr [1024 x i32], [1024 x i32]* @stack, i32 0, i32 %topsp\n")
+    out.write("  %val = load i32, i32* %addr\n")
+    out.write("  store i32 %topsp, i32* @sp\n")
+    out.write("  ret i32 %val\n")
+    out.write("}\n")
+
+def compile_print_function(out: TextIOWrapper):
+    """Write the LLVM IR for the print intrinsic word function to an open()ed file"""
+    out.write("declare i32 @printf(i8*, ...)\n")
+    out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
+
+def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, words: list[Word]):
+    """Write LLVM IR for a procedure to an open()ed file"""
+    assert len(OT) == 5, "Exhaustive handling of Op Types in compile_proc_to_ll()"
+    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
+    assert len(Keyword) == 6, "Exhaustive handling of Keywords in compile_proc_to_ll()"
+    out.write(f"define void @proc_{proc_name}() ")
+    out.write("{\n")
+    out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i32 0, i32 0\n")
+    c: int = 0 # counter for unique numbers
+    for ip, word in enumerate(words):
+        out.write(f"  ; {str(word)}\n")
+        if word.typ == OT.PUSH_INT:
+            assert type(word.operand) == int, "PUSH_INT word has non-int type"
+            out.write(f"  call void(i32) @push(i32 {word.operand})\n")
+        elif word.typ == OT.PROC_CALL:
+            out.write(f"  call void() @proc_{word.operand}()\n")
+        elif word.typ == OT.KEYWORD:
+            if word.operand == Keyword.PROC:
+                assert False, f"Word: {word} of type keyword:PROC allowed to reach compile_proc_to_ll()"
+            if word.operand == Keyword.IF:
+                pass
+            elif word.operand == Keyword.ELIF:
+                out.write(f"  br label %ls{ip}\n") # So that LLVM thinks the block is 'closed'
+                out.write(f"ls{ip}:\n") # Label to jump to from previous (el)if
+                out.write(f"  br label %ls{word.jmp}\n") # Jump to the end if we hit the elif
+                out.write(f"l{ip}:\n") # Label to jump to from previous (el)if
+            elif word.operand == Keyword.DO:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                # Compare number with 0 (true if a{n} != 0)
+                out.write(f"  %b{c} = icmp ne i32 %a{c}, 0\n")
+                # Jump to right in front if true, or `end` if false
+                out.write(f"  br i1 %b{c}, label %l{ip}, label %l{word.jmp}\n")
+                out.write(f"l{ip}:\n") # Label to jump to if true
+                c += 1
+            elif word.operand == Keyword.ELSE:
+                out.write(f"  br label %l{word.jmp}\n")
+                out.write(f"l{ip}:\n")
+            elif word.operand == Keyword.END:
+                out.write(f"  br label %l{word.jmp}\n")
+                out.write(f"l{ip}:\n")
+                out.write(f"  br label %ls{ip}\n") # 'Close' the block for llvm
+                out.write(f"ls{ip}:\n") # Skip label
+            else:
+                assert False, f"Unknown keyword {word}"
+        elif word.typ == OT.INTRINSIC:
+            assert type(word.operand) == Intrinsic, "Intrinsic word has non-intrinsic type"
+            if word.operand == Intrinsic.PLUS:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = add i32 %a{c}, %b{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.MINUS:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = sub i32 %b{c}, %a{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.MULT:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = mul i32 %a{c}, %b{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.DIV:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = sdiv i32 %b{c}, %a{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.MOD:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = srem i32 %b{c}, %a{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.SHL:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = shl i32 %b{c}, %a{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.SHR:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  %b{c} = call i32() @pop()\n")
+                out.write(f"  %c{c} = lshr i32 %b{c}, %a{c}\n")
+                out.write(f"  call void(i32) @push(i32 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.DUP:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  call void(i32) @push(i32 %a{c})\n")
+                out.write(f"  call void(i32) @push(i32 %a{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.DROP:
+                out.write(f"  call i32() @pop()\n")
+                c += 1
+            elif word.operand == Intrinsic.PRINT:
+                out.write(f"  %a{c} = call i32() @pop()\n")
+                out.write(f"  call i32(i8*, ...) @printf(i8* %fmtptr, i32 %a{c})\n")
+                c += 1
+            else:
+                assert False, f"Unknown Intrinsic {word}"
+        else:
+            assert False, f"Unknown Op Type {word}"
+
+    out.write("  ret void\n")
+    out.write("}\n")
+
+def compile_main_function(out: TextIOWrapper):
+    """Write LLVM IR for a main function (the entry point) to an open()ed file"""
+    out.write("define i32 @main() {\n")
+    out.write("  call void() @proc_main()\n")
+    out.write("  ret i32 0\n")
+    out.write("}\n")
+
+def compile_program_to_ll(program: Program, out_file_path: str):
     """Compile a series of Words into an llvm IR file (.ll)"""
-    assert len(OT) == 3, "Exhaustive handling of Op Types in compile_program()"
-    assert len(Intrinsic) == 10, "Exhaustive handling of Intrincics in compile_program()"
-    assert len(Keyword) == 5, "Exhaustive handling of Keywords in compile_program()"
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
-        # Push and pop operations
-        out.write("@stack = global [1024 x i32] undef\n")
-        out.write("@sp    = global i32 0\n")
-        out.write("define void @push(i32 %val) {\n")
-        out.write("  %sp = load i32, i32* @sp\n")
-        out.write("  %addr = getelementptr [1024 x i32], [1024 x i32]* @stack, i32 0, i32 %sp\n")
-        out.write("  store i32 %val, i32* %addr\n")
-        out.write("  %newsp = add i32 %sp, 1\n")
-        out.write("  store i32 %newsp, i32* @sp\n")
-        out.write("  ret void\n")
-        out.write("}\n")
-        out.write("define i32 @pop() {\n")
-        out.write("  %sp = load i32, i32* @sp\n")
-        out.write("  %topsp = sub i32 %sp, 1\n")
-        out.write("  %addr = getelementptr [1024 x i32], [1024 x i32]* @stack, i32 0, i32 %topsp\n")
-        out.write("  %val = load i32, i32* %addr\n")
-        out.write("  store i32 %topsp, i32* @sp\n")
-        out.write("  ret i32 %val\n")
-        out.write("}\n")
-        out.write("declare i32 @printf(i8*, ...)")
-        out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"")
-        out.write("define i32 @main() {\n")
-        out.write("%fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i32 0, i32 0\n")
-        c: int = 0 # counter for unique numbers
-        for ip, word in enumerate(program):
-            out.write(f"  ; {str(word)}\n")
-            if word.typ == OT.PUSH_INT:
-                assert type(word.operand) == int, "PUSH_INT word has non-int type"
-                out.write(f"  call void(i32) @push(i32 {word.operand})\n")
-            elif word.typ == OT.KEYWORD:
-                if word.operand == Keyword.IF:
-                    pass
-                elif word.operand == Keyword.ELIF:
-                    out.write(f"  br label %ls{ip}\n") # So that LLVM thinks the block is 'closed'
-                    out.write(f"ls{ip}:\n") # Label to jump to from previous (el)if
-                    out.write(f"  br label %ls{word.jmp}\n") # Jump to the end if we hit the elif
-                    out.write(f"l{ip}:\n") # Label to jump to from previous (el)if
-                elif word.operand == Keyword.DO:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    # Compare number with 0 (true if a{n} != 0)
-                    out.write(f"  %b{c} = icmp ne i32 %a{c}, 0\n")
-                    # Jump to right in front if true, or `end` if false
-                    out.write(f"  br i1 %b{c}, label %l{ip}, label %l{word.jmp}\n")
-                    out.write(f"l{ip}:\n") # Label to jump to if true
-                    c += 1
-                elif word.operand == Keyword.ELSE:
-                    out.write(f"  br label %l{word.jmp}\n")
-                    out.write(f"l{ip}:\n")
-                elif word.operand == Keyword.END:
-                    out.write(f"  br label %l{word.jmp}\n")
-                    out.write(f"l{ip}:\n")
-                    out.write(f"  br label %ls{ip}\n") # 'Close' the block for llvm
-                    out.write(f"ls{ip}:\n") # Skip label
-                else:
-                    assert False, f"Unknown keyword {word}"
-            elif word.typ == OT.INTRINSIC:
-                assert type(word.operand) == Intrinsic, "Intrinsic word has non-intrinsic type"
-                if word.operand == Intrinsic.PLUS:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = add i32 %a{c}, %b{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.MINUS:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = sub i32 %b{c}, %a{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.MULT:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = mul i32 %a{c}, %b{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.DIV:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = sdiv i32 %b{c}, %a{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.MOD:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = srem i32 %b{c}, %a{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.SHL:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = shl i32 %b{c}, %a{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.SHR:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  %b{c} = call i32() @pop()\n")
-                    out.write(f"  %c{c} = lshr i32 %b{c}, %a{c}\n")
-                    out.write(f"  call void(i32) @push(i32 %c{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.DUP:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  call void(i32) @push(i32 %a{c})\n")
-                    out.write(f"  call void(i32) @push(i32 %a{c})\n")
-                    c += 1
-                elif word.operand == Intrinsic.DROP:
-                    out.write(f"  call i32() @pop()\n")
-                    c += 1
-                elif word.operand == Intrinsic.PRINT:
-                    out.write(f"  %a{c} = call i32() @pop()\n")
-                    out.write(f"  call i32(i8*, ...) @printf(i8* %fmtptr, i32 %a{c})\n")
-                    c += 1
-                else:
-                    assert False, f"Unknown Intrinsic {word}"
+        compile_push_pop_functions(out)
+        compile_print_function(out)
+        found_main = False
+        for proc_name in program.procs:
+            if proc_name == "main":
+                found_main = True
             else:
-                assert False, f"Unknown Op Type {word}"
+                print(proc_name, "HHH")
+            compile_proc_to_ll(out, proc_name, program.procs[proc_name])
 
-        out.write("  ret i32 0\n")
-        out.write("}\n")
+        if not found_main:
+            err_tok = Token(TT.WORD, "", program.file_path, 0, 0, [])
+            compiler_error(err_tok, "No entry point found (expected `proc main ...`)")
+            sys.exit(1)
+        else:
+            compile_main_function(out)
 
 def compile_ll_to_bin(ll_path: str, bin_path: str):
     print(f"[INFO] Compiling `{ll_path}` to native binary")
@@ -491,9 +592,15 @@ def main():
             sys.exit(1)
 
         toks = preprocess_macros(toks)
-        program = parse_tokens_into_words(toks)
+        words = parse_tokens_into_words(toks)
         # print(repr_program(program))
-        crossreference_program(program)
+        program: Program = parse_words_into_program(src_path, words)
+        for proc in program.procs:
+            crossreference_proc(program.procs[proc])
+        for proc in program.procs:
+            print(f"proc {proc}")
+            print(repr_program(program.procs[proc]))
+            print("end")
 
         compile_program_to_ll(program, ll_path)
     if command in ("com", "from-ll"):

@@ -1,2 +1,4 @@
-2 dup print print
-0 1 drop print
+proc main
+  2 dup print print
+  0 1 drop print
+end

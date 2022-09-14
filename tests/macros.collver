@@ -10,4 +10,6 @@ macro more_numbers
   inline_number
 end
 
-numbers
+proc main
+  numbers
+end

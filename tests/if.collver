@@ -1,21 +1,23 @@
-if 1 do
-  1 print
-else
-  2 print
-end
+proc main
+  if 1 do
+    1 print
+  else
+    2 print
+  end
 
-if 0 do
-  3 print
-else
-  4 print
-end
+  if 0 do
+    3 print
+  else
+    4 print
+  end
 
-if 0 do
-  5 print
-elif 0 do
-  6 print
-elif 1 do
-  7 print
-else
-  8 print
+  if 0 do
+    5 print
+  elif 0 do
+    6 print
+  elif 1 do
+    7 print
+  else
+    8 print
+  end
 end
