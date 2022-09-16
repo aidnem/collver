@@ -1,0 +1,8 @@
+proc _unused
+  memory mem 0
+end
+
+proc main
+  mem
+end
+
