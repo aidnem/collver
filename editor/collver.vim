@@ -14,7 +14,7 @@ set iskeyword=a-z,A-Z,-,*,_,!,@
 syntax keyword collverTodos TODO FIXME NOTE
 
 " Language keywords
-syntax keyword collverKeywords if elif else while do proc end memory
+syntax keyword collverKeywords if elif else while do proc const end memory
 
 " Comments
 syntax region collverCommentLine start="//" end="$"   contains=collverTodos
