@@ -177,6 +177,7 @@ def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
     rtokens = list(reversed(tokens))
     consts: dict[str, int] = {}
     new_tokens: list[Token] = []
+    offset: int = 0
     while len(rtokens):
         tok = rtokens.pop()
         if tok.typ == TT.WORD and tok.value == "const":
@@ -215,8 +216,15 @@ def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
                     b = body_stack.pop()
                     c = a * b
                     body_stack.append(c)
+                elif body_tok.typ == TT.WORD and body_tok.value == "offset":
+                    a = body_stack.pop()
+                    body_stack.append(offset)
+                    offset += a
+                elif body_tok.typ == TT.WORD and body_tok.value == "reset":
+                    body_stack.append(offset)
+                    offset = 0
                 else:
-                    compiler_error(body_tok, f"Unknown word in const definition `{body_tok.value}`")
+                    compiler_error(body_tok, f"Unsupported word in const definition `{body_tok.value}`")
 
             if body_tok is None:
                 compiler_error(name_tok, "Expected const body or `end` word, found EOF")
