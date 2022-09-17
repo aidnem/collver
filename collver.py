@@ -41,6 +41,7 @@ class Keyword(Enum):
     PROC   = auto()
     IF     = auto()
     ELIF   = auto()
+    WHILE  = auto()
     DO     = auto()
     ELSE   = auto()
     END    = auto()
@@ -126,12 +127,13 @@ def lex_file(file_path) -> list[Token]:
     return toks
 
 
-assert len(Keyword) == 7, "Exhaustive map of Words in STR_TO_KEYWORD"
+assert len(Keyword) == 8, "Exhaustive map of Words in STR_TO_KEYWORD"
 STR_TO_KEYWORD: dict[str, Keyword] = {
     "memory": Keyword.MEMORY,
     "proc": Keyword.PROC,
     "if": Keyword.IF,
     "elif": Keyword.ELIF,
+    "while": Keyword.WHILE,
     "do": Keyword.DO,
     "else": Keyword.ELSE,
     "end": Keyword.END,
@@ -294,9 +296,10 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
 
     return words
 
-assert len(Keyword) == 7, "Exhaustive list of control flow words for BLOCK_STARTERS"
+assert len(Keyword) == 8, "Exhaustive list of control flow words for BLOCK_STARTERS"
 BLOCK_STARTERS: list[Keyword] = [
     Keyword.IF,
+    Keyword.WHILE,
 ]
 def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     """Parse a series of words into a Program() object"""
@@ -373,11 +376,13 @@ def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
     assert len(OT) == 7, "Exhaustive handling of Op Types in crossreference_proc()"
     assert len(Intrinsic) == 14, "Exhaustive handling of Intrincics in crossreference_proc()"
-    assert len(Keyword) == 7, "Exhaustive handling of Keywords in crossreference_proc()"
+    assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
         if word.typ == OT.KEYWORD:
             if word.operand == Keyword.IF:
+                stack.append(ip)
+            if word.operand == Keyword.WHILE:
                 stack.append(ip)
             elif word.operand == Keyword.ELIF:
                 try:
@@ -431,9 +436,10 @@ def crossreference_proc(proc: Proc) -> None:
                 if start_word.operand == Keyword.IF:
                     word.jmp = ip
                 elif start_word.operand == Keyword.ELIF:
-                    print("I found it")
                     word.jmp = ip
                     start_word.jmp = ip
+                elif start_word.operand == Keyword.WHILE:
+                    word.jmp = start_ip
                 else:
                     compiler_error(word.tok, "Word `end` can only close `(el)if ... do` block")
                     sys.exit(1)
@@ -475,7 +481,7 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 7, "Exhaustive handling of Op Types in compile_proc_to_ll()"
     assert len(Intrinsic) == 14, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
-    assert len(Keyword) == 7, "Exhaustive handling of Keywords in compile_proc_to_ll()"
+    assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
     out.write(f"define void @proc_{proc_name}() ")
     out.write("{\n")
     out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0\n")
@@ -510,6 +516,9 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
                 out.write(f"ls{ip}:\n") # Label to jump to from previous (el)if
                 out.write(f"  br label %ls{word.jmp}\n") # Jump to the end if we hit the elif
                 out.write(f"l{ip}:\n") # Label to jump to from previous (el)if
+            elif word.operand == Keyword.WHILE:
+                out.write(f"  br label %l{ip}\n") # So that LLVM thinks the block is 'closed'
+                out.write(f"l{ip}:\n") # Label for the end to jump to
             elif word.operand == Keyword.DO:
                 out.write(f"  %a{c} = call i64() @pop()\n")
                 # Compare number with 0 (true if a{n} != 0)

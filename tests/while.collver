@@ -1,0 +1,7 @@
+proc main
+  10
+  while dup do
+    dup print
+    1 -
+  end
+end
