@@ -1,6 +1,6 @@
 proc main
   10
-  while dup do
+  while dup 0 > do
     dup print
     1 -
   end
