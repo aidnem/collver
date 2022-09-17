@@ -1,8 +1,25 @@
+memory global_bytes 3 end
+
+proc write_mem
+  47 global_bytes     !8
+  51 global_bytes 1 + !8
+  14 global_bytes 2 + !8
+end
+
+proc read_mem
+  global_bytes     @8 print
+  global_bytes 1 + @8 print
+  global_bytes 2 + @8 print
+end
+
 proc main
-  memory i64 8 end
+  memory local_i64 8 end
   2 16 <<
   1 +
-  i64 !64
-  i64 2 + @8 print
-  i64 @8 print
+  local_i64 !64
+  local_i64 2 + @8 print
+  local_i64 @8 print
+
+  write_mem
+  read_mem
 end

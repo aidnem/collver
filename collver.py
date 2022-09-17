@@ -280,6 +280,7 @@ class Program:
     """A program in intermediate representation"""
     file_path: str
     procs: dict[str, Proc]
+    memories: dict[str, int]
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
@@ -378,58 +379,70 @@ def eval_memory_size(rwords: list[Word], name_word: Word) -> int:
 
 def parse_words_into_program(file_path: str, words: list[Word], consts: dict[str, int]) -> Program:
     """Parse a series of words into a Program() object"""
-    program = Program(file_path, {})
+    program = Program(file_path, {}, {})
     rwords = list(reversed(words))
     word_buf: list[Word] = []
     mem_buf: dict[str, int] = {}
     nesting_depth = 0
     while len(rwords):
         word = rwords.pop()
-        if word.operand != Keyword.PROC:
-            compiler_error(word.tok, f"Expected `proc` keyword")
-            sys.exit(1)
-        if len(rwords):
-            name_word = rwords.pop()
-            assert name_word.typ == OT.PROC_NAME, "`proc` keyword followed by non-proc_name word (compiler bug)"
-        else:
-            compiler_error(word.tok, f"Expected name of proc, found nothing")
-            sys.exit(1)
-
-        while len(rwords):
-            word = rwords.pop()
-            if word.typ == OT.KEYWORD and word.operand == Keyword.MEMORY:
-                if len(rwords):
-                    mem_name_word = rwords.pop()
-                else:
-                    compiler_error(word.tok, "Expected name of memory, found nothing")
-                    sys.exit(1)
-
-                mem_name = str(mem_name_word.operand)
-
-                mem_buf[mem_name] = eval_memory_size(rwords, name_word)
-
+        if word.typ == OT.KEYWORD and word.operand == Keyword.PROC:
+            if len(rwords):
+                name_word = rwords.pop()
+                assert name_word.typ == OT.PROC_NAME, "`proc` keyword followed by non-proc_name word (compiler bug)"
             else:
-                rwords.append(word)
-                break
+                compiler_error(word.tok, f"Expected name of proc, found nothing")
+                sys.exit(1)
 
-        while len(rwords):
-            word = rwords.pop()
-            if word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
-                nesting_depth += 1
-            elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
-                if nesting_depth:
-                    nesting_depth -= 1
+            while len(rwords):
+                word = rwords.pop()
+                if word.typ == OT.KEYWORD and word.operand == Keyword.MEMORY:
+                    if len(rwords):
+                        mem_name_word = rwords.pop()
+                    else:
+                        compiler_error(word.tok, "Expected name of memory, found nothing")
+                        sys.exit(1)
+
+                    mem_name = str(mem_name_word.operand)
+
+                    mem_buf[mem_name] = eval_memory_size(rwords, mem_name_word)
                 else:
+                    rwords.append(word)
                     break
-            word_buf.append(word)
 
-        if word.operand != Keyword.END:
-            compiler_error(word.tok, f"Expected `end` keyword at end of proc, found nothing")
+            while len(rwords):
+                word = rwords.pop()
+                if word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
+                    nesting_depth += 1
+                elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
+                    if nesting_depth:
+                        nesting_depth -= 1
+                    else:
+                        break
+                word_buf.append(word)
+
+            if word.operand != Keyword.END:
+                compiler_error(word.tok, f"Expected `end` keyword at end of proc, found nothing")
+                sys.exit(1)
+
+            program.procs[str(name_word.operand)] = Proc(mem_buf, word_buf)
+            word_buf = []
+            mem_buf = {}
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.MEMORY:
+            if len(rwords):
+                mem_name_word = rwords.pop()
+            else:
+                compiler_error(word.tok, "Expected name of memory, found nothing")
+                sys.exit(1)
+
+            mem_name = str(mem_name_word.operand)
+
+            mem_size: int = eval_memory_size(rwords, mem_name_word)
+            print(f"<DEBUG> Found global memory {mem_name} of size {mem_size}")
+            program.memories[mem_name] = mem_size
+        else:
+            compiler_error(word.tok, f"Expected `proc` or `memory` keywords")
             sys.exit(1)
-
-        program.procs[str(name_word.operand)] = Proc(mem_buf, word_buf)
-        word_buf = []
-        mem_buf = {}
 
     return program
 
@@ -538,7 +551,14 @@ def compile_print_function(out: TextIOWrapper):
     out.write("declare i64 @printf(i8*, ...)\n")
     out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
 
-def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
+def compile_global_memories(out: TextIOWrapper, memories: dict[str, int]):
+    """Write the LLVM IR for global memories to an open()ed file"""
+    for memory in memories:
+        mem_size = memories[memory]
+        out.write(f"; global memory {memory} {mem_size}\n")
+        out.write(f"@global_mem_{memory} = global [{mem_size} x i8] zeroinitializer\n") # Memories are in number of bytes
+
+def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_memories: dict[str, int]):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 7, "Exhaustive handling of Op Types in compile_proc_to_ll()"
     assert len(Intrinsic) == 20, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
@@ -565,8 +585,12 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
                 out.write(f"  %ptrto_{memory}_{c} = ptrtoint [{proc.memories[memory]} x i8]* %mem_{memory} to i64\n")
                 out.write(f"  call void(i64) @push(i64 %ptrto_{memory}_{c})\n")
                 c += 1
+            elif memory in global_memories:
+                out.write(f"  %ptrto_{memory}_{c} = ptrtoint [{global_memories[memory]} x i8]* @global_mem_{memory} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %ptrto_{memory}_{c})\n")
+                c += 1
             else:
-                compiler_error(word.tok, f"Memory {memory} is not defined in proc {proc_name}")
+                compiler_error(word.tok, f"Memory {memory} is not defined globally or in proc {proc_name}")
                 sys.exit(1)
         elif word.typ == OT.KEYWORD:
             if word.operand == Keyword.PROC:
@@ -745,11 +769,12 @@ def compile_program_to_ll(program: Program, out_file_path: str):
     with open(out_file_path, "w+") as out:
         compile_push_pop_functions(out)
         compile_print_function(out)
+        compile_global_memories(out, program.memories)
         found_main = False
         for proc_name in program.procs:
             if proc_name == "main":
                 found_main = True
-            compile_proc_to_ll(out, proc_name, program.procs[proc_name])
+            compile_proc_to_ll(out, proc_name, program.procs[proc_name], program.memories)
 
         if not found_main:
             err_tok = Token(TT.WORD, "", program.file_path, 0, 0)
