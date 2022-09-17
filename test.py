@@ -150,6 +150,10 @@ def test_output(res: TestResult) -> list[Problem]:
         )
     )
 
+    if len(probs):
+        print("-> failed")
+    else:
+        print("-> passed")
     return probs
 
 def test_specfile(fp: str) -> list[Problem]:

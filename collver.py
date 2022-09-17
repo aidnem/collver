@@ -53,6 +53,12 @@ class Intrinsic(Enum):
     MULT    = auto()
     DIV     = auto()
     MOD     = auto()
+    EQ      = auto()
+    NE      = auto()
+    GT      = auto()
+    LT      = auto()
+    GE      = auto()
+    LE      = auto()
     SHL     = auto()
     SHR     = auto()
     DUP     = auto()
@@ -60,7 +66,7 @@ class Intrinsic(Enum):
     PRINT   = auto()
     STORE8  = auto()
     LOAD8   = auto()
-    STORE64 =auto()
+    STORE64 = auto()
     LOAD64  = auto()
 
 @dataclass
@@ -139,13 +145,19 @@ STR_TO_KEYWORD: dict[str, Keyword] = {
     "end": Keyword.END,
 }
 
-assert len(Intrinsic) == 14, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
+assert len(Intrinsic) == 20, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
 STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "+": Intrinsic.PLUS,
     "-": Intrinsic.MINUS,
     "*": Intrinsic.MULT,
     "/": Intrinsic.DIV,
     "%": Intrinsic.MOD,
+    "=": Intrinsic.EQ,
+    "!=": Intrinsic.NE,
+    ">": Intrinsic.GT,
+    "<": Intrinsic.LT,
+    ">=": Intrinsic.GE,
+    "<=": Intrinsic.LE,
     "<<": Intrinsic.SHL,
     ">>": Intrinsic.SHR,
     "dup": Intrinsic.DUP,
@@ -375,7 +387,7 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
     assert len(OT) == 7, "Exhaustive handling of Op Types in crossreference_proc()"
-    assert len(Intrinsic) == 14, "Exhaustive handling of Intrincics in crossreference_proc()"
+    assert len(Intrinsic) == 20, "Exhaustive handling of Intrincics in crossreference_proc()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
@@ -480,7 +492,7 @@ def compile_print_function(out: TextIOWrapper):
 def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 7, "Exhaustive handling of Op Types in compile_proc_to_ll()"
-    assert len(Intrinsic) == 14, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
+    assert len(Intrinsic) == 20, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
     out.write(f"define void @proc_{proc_name}() ")
     out.write("{\n")
@@ -567,6 +579,48 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
                 out.write(f"  %a{c} = call i64() @pop()\n")
                 out.write(f"  %b{c} = call i64() @pop()\n")
                 out.write(f"  %c{c} = srem i64 %b{c}, %a{c}\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.EQ:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp eq i64 %a{c}, %b{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.NE:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp ne i64 %a{c}, %b{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.GT:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp sgt i64 %b{c}, %a{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.LT:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp slt i64 %b{c}, %a{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.GE:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp sge i64 %b{c}, %a{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %c{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.LE:
+                out.write(f"  %a{c} = call i64() @pop()\n")
+                out.write(f"  %b{c} = call i64() @pop()\n")
+                out.write(f"  %c_i1{c} = icmp sle i64 %b{c}, %a{c}\n")
+                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
                 out.write(f"  call void(i64) @push(i64 %c{c})\n")
                 c += 1
             elif word.operand == Intrinsic.SHL:
