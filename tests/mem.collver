@@ -1,5 +1,5 @@
 proc main
-  memory i64 8
+  memory i64 8 end
   2 16 <<
   1 +
   i64 !64

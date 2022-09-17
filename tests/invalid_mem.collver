@@ -1,5 +1,5 @@
 proc _unused
-  memory mem 0
+  memory mem 0 end
 end
 
 proc main

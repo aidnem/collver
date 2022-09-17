@@ -130,7 +130,7 @@ def lex_file(file_path) -> list[Token]:
                 except ValueError:
                     val = string
                     typ = TT.WORD
-                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col)
+                tok = Token(typ=typ, value=val, file=file_path, row=row, col=col)
                 toks.append(tok)
     return toks
 
@@ -225,6 +225,7 @@ def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
                     offset = 0
                 else:
                     compiler_error(body_tok, f"Unsupported word in const definition `{body_tok.value}`")
+                    sys.exit(1)
 
             if body_tok is None:
                 compiler_error(name_tok, "Expected const body or `end` word, found EOF")
@@ -235,8 +236,10 @@ def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
 
             if len(body_stack) > 1:
                 compiler_error(name_tok, f"Const value expression evaluated to more than one value")
+                sys.exit(1)
             elif len(body_stack) == 0:
                 compiler_error(name_tok, f"Const value expression evaluated to 0 values")
+                sys.exit(1)
             else:
                 consts[str(name_tok.value)] = body_stack[0]
         else:
@@ -258,13 +261,13 @@ def replace_consts(consts: dict[str, int], tokens: list[Token]) -> list[Token]:
             new_tokens.append(tok)
     return new_tokens
 
-def preprocess_consts(tokens: list[Token]) -> list[Token]:
+def preprocess_consts(tokens: list[Token]) -> tuple[list[Token], dict[str, int]]:
     """Given a list of tokens, extract const definitions and replace const references"""
     consts: dict[str, int] = {}
     consts, tokens = extract_consts(tokens)
     tokens = replace_consts(consts, tokens)
 
-    return tokens
+    return tokens, consts
 
 @dataclass
 class Proc:
@@ -326,7 +329,54 @@ BLOCK_STARTERS: list[Keyword] = [
     Keyword.IF,
     Keyword.WHILE,
 ]
-def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
+
+def eval_memory_size(rwords: list[Word], name_word: Word) -> int:
+    """Parse and evaluate a memory definition's body, returning the size"""
+    body_stack: list[int] = []
+    body_word: Optional[Word] = None
+    while len(rwords):
+        body_word = rwords.pop()
+        if body_word.typ == OT.KEYWORD and body_word.operand == Keyword.END:
+            break
+        elif body_word.typ == OT.PUSH_INT:
+            assert isinstance(body_word.operand, int), "PUSH_INT word with non-int operand"
+            body_stack.append(int(body_word.operand))
+        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.PLUS:
+            a = body_stack.pop()
+            b = body_stack.pop()
+            c = a + b
+            body_stack.append(c)
+        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.MINUS:
+            a = body_stack.pop()
+            b = body_stack.pop()
+            c = b - a
+            body_stack.append(c)
+        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.MULT:
+            a = body_stack.pop()
+            b = body_stack.pop()
+            c = a * b
+            body_stack.append(c)
+        else:
+            compiler_error(body_word.tok, f"Unsupported word in memory definition `{body_word}`")
+            sys.exit(1)
+
+    if body_word is None:
+        compiler_error(name_word.tok, "Expected memory size definition body or `end` word, found EOF")
+        sys.exit(1)
+    elif body_word.typ != OT.KEYWORD or body_word.operand != Keyword.END:
+        compiler_error(body_word.tok, "Expected `end` word to close memory definition, found EOF")
+        sys.exit(1)
+
+    if len(body_stack) > 1:
+        compiler_error(name_word.tok, f"Memory size expression evaluated to more than one value")
+        sys.exit(1)
+    elif len(body_stack) == 0:
+        compiler_error(name_word.tok, f"Memory size expression evaluated to 0 values")
+        sys.exit(1)
+
+    return body_stack[0]
+
+def parse_words_into_program(file_path: str, words: list[Word], consts: dict[str, int]) -> Program:
     """Parse a series of words into a Program() object"""
     program = Program(file_path, {})
     rwords = list(reversed(words))
@@ -356,19 +406,8 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 
                 mem_name = str(mem_name_word.operand)
 
-                if len(rwords):
-                    size_word = rwords.pop()
-                else:
-                    compiler_error(word.tok, "Expected size of memory, found nothing")
-                    sys.exit(1)
+                mem_buf[mem_name] = eval_memory_size(rwords, name_word)
 
-                if size_word.typ == OT.PUSH_INT:
-                    mem_size = int(str(size_word.operand)) # Double cast for my linter (he's a little special)
-                else:
-                    compiler_error(size_word.tok, "Expected size of memory (`int`)")
-                    sys.exit(1)
-
-                mem_buf[mem_name] = mem_size
             else:
                 rwords.append(word)
                 break
@@ -528,6 +567,7 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
                 c += 1
             else:
                 compiler_error(word.tok, f"Memory {memory} is not defined in proc {proc_name}")
+                sys.exit(1)
         elif word.typ == OT.KEYWORD:
             if word.operand == Keyword.PROC:
                 assert False, f"Word: {word} of type keyword:PROC allowed to reach compile_proc_to_ll()"
@@ -762,10 +802,10 @@ def main():
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
-        toks = preprocess_consts(toks)
+        toks, consts = preprocess_consts(toks)
         words = parse_tokens_into_words(toks)
         # print(repr_program(program))
-        program: Program = parse_words_into_program(src_path, words)
+        program: Program = parse_words_into_program(src_path, words, consts)
         for proc in program.procs:
             crossreference_proc(program.procs[proc])
         # for proc in program.procs:
