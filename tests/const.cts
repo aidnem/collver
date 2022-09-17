@@ -1,6 +1,5 @@
 [!FILE]
-macros.collver
+const.collver
 [!STDOUT]
 172
-47
-98
+200

@@ -1,0 +1,10 @@
+const number
+  172
+end
+
+const number2 number 28 + end
+
+proc main
+  number print
+  number2 print
+end

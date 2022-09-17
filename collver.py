@@ -23,7 +23,6 @@ class Token:
     file  : str                  # File that the token originated in
     row   : int                  # Row that the token is on (0 indexed)
     col   : int                  # Row that the token is on (0 indexed)
-    expanded_from: list['Token'] # List of macro name tokens that this token has been expanded from
 
 class OT(Enum):
     """Operation Types of words"""
@@ -103,6 +102,9 @@ def lex_line(line: str) -> list[tuple[int, str]]:
             if len(buffer) != 0:
                 chunks.append((start_idx, buffer))
                 buffer = ""
+        elif c == "/" and buffer == "/":
+            buffer = ""
+            break
         else:
             if len(buffer) == 0:
                 start_idx = idx
@@ -123,12 +125,12 @@ def lex_file(file_path) -> list[Token]:
         for (row, line) in enumerate(f.readlines()):
             for (col, string) in lex_line(line):
                 try:
-                    val = int(string)
+                    val: int|str = int(string)
                     typ = TT.INT
                 except ValueError:
                     val = string
                     typ = TT.WORD
-                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col, expanded_from=[])
+                tok = Token(typ=typ, value=val, file=os.path.basename(file_path), row=row, col=col)
                 toks.append(tok)
     return toks
 
@@ -169,88 +171,91 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "@64": Intrinsic.LOAD64,
 }
 
-def extract_macros(tokens: list[Token]) -> tuple[dict[str, list[Token]], list[Token]]:
-    """Extract macro definitions and return the defined macros and new tokens"""
+
+def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
+    """Extract const definitions and return the defined consts and new tokens"""
     rtokens = list(reversed(tokens))
-    macros: dict[str, list[Token]] = {}
+    consts: dict[str, int] = {}
     new_tokens: list[Token] = []
     while len(rtokens):
         tok = rtokens.pop()
-        if tok.typ == TT.WORD and tok.value == "macro":
+        if tok.typ == TT.WORD and tok.value == "const":
             if len(rtokens):
                 name_tok = rtokens.pop()
             else:
-                compiler_error(tok, "Malformed macro definition")
+                compiler_error(tok, "Malformed const definition")
                 sys.exit(1)
 
             if name_tok.typ != TT.WORD:
-                compiler_error(name_tok, "Expected token of type `word` for macro name")
+                compiler_error(name_tok, "Expected token of type `word` for const name")
                 sys.exit(1)
 
-
-            body_toks = []
+            body_stack: list[int] = []
             body_tok: Optional[Token] = None
             while len(rtokens):
                 body_tok = rtokens.pop()
                 if body_tok.typ == TT.WORD and body_tok.value == "end":
                     break
-                if body_tok.typ == TT.WORD and body_tok.value == name_tok.value:
-                    compiler_error(body_tok, f"Recursive definition of macro `{name_tok.value}`")
-                body_toks.append(body_tok)
+                if body_tok.typ == TT.WORD and body_tok.value in consts:
+                    body_stack.append(consts[str(body_tok.value)])
+                elif body_tok.typ == TT.INT:
+                    body_stack.append(int(body_tok.value))
+                elif body_tok.typ == TT.WORD and body_tok.value == "+":
+                    a = body_stack.pop()
+                    b = body_stack.pop()
+                    c = a + b
+                    body_stack.append(c)
+                elif body_tok.typ == TT.WORD and body_tok.value == "-":
+                    a = body_stack.pop()
+                    b = body_stack.pop()
+                    c = b - a
+                    body_stack.append(c)
+                elif body_tok.typ == TT.WORD and body_tok.value == "*":
+                    a = body_stack.pop()
+                    b = body_stack.pop()
+                    c = a * b
+                    body_stack.append(c)
+                else:
+                    compiler_error(body_tok, f"Unknown word in const definition `{body_tok.value}`")
 
             if body_tok is None:
-                compiler_error(name_tok, "Expected macro body or `end` word, found EOF")
+                compiler_error(name_tok, "Expected const body or `end` word, found EOF")
                 sys.exit(1)
             elif body_tok.typ != TT.WORD or body_tok.value != "end":
-                compiler_error(body_tok, "Expected `end` word to close macro definition, found EOF")
+                compiler_error(body_tok, "Expected `end` word to close const definition, found EOF")
                 sys.exit(1)
 
-            assert type(name_tok.value) == str, "`word` token with non-str value"
-            macros[str(name_tok.value)] = body_toks
+            if len(body_stack) > 1:
+                compiler_error(name_tok, f"Const value expression evaluated to more than one value")
+            elif len(body_stack) == 0:
+                compiler_error(name_tok, f"Const value expression evaluated to 0 values")
+            else:
+                consts[str(name_tok.value)] = body_stack[0]
         else:
             new_tokens.append(tok)
 
-    return macros, new_tokens
+    return consts, new_tokens
 
-def check_macros(macros: dict[str, list[Token]], tokens: list[Token]) -> bool:
-    """Check whether or not a series of tokens contains any un-expanded macro references"""
-    for tok in tokens:
-        if tok.typ == TT.WORD and tok.value in macros:
-            return True
-
-    return False
-
-def expand_macros(macros: dict[str, list[Token]], tokens: list[Token]) -> list[Token]:
-    """Expand references to macros and return the new, expanded set of tokens"""
-    new_tokens: list[Token] = []
-    for token in tokens:
-        if token.typ == TT.WORD and token.value in macros:
-            expanded = copy.deepcopy(macros[token.value])
-            for etok in token.expanded_from:
-                if token.file == etok.file and token.row == etok.row and token.file == etok.file:
-                    compiler_error(token, "Cyclic macro reference")
-                    for etok in token.expanded_from:
-                        compiler_note(etok, "Expanded from here")
-                    sys.exit(1)
-
-            for tok in expanded:
-                tok.expanded_from.append(token)
-                tok.expanded_from.extend(token.expanded_from)
-            new_tokens.extend(expanded)
+def replace_consts(consts: dict[str, int], tokens: list[Token]) -> list[Token]:
+    """Replace references to consts with their values in a list of tokens"""
+    rtokens = list(reversed(tokens))
+    new_tokens = []
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.WORD and tok.value in consts:
+            new_tok = Token(TT.INT, consts[str(tok.value)], tok.file, tok.row, tok.col)
+            print(new_tok)
+            new_tokens.append(new_tok)
         else:
-            new_tokens.append(token)
-
+            new_tokens.append(tok)
     return new_tokens
 
+def preprocess_consts(tokens: list[Token]) -> list[Token]:
+    """Given a list of tokens, extract const definitions and replace const references"""
+    consts: dict[str, int] = {}
+    consts, tokens = extract_consts(tokens)
+    tokens = replace_consts(consts, tokens)
 
-def preprocess_macros(tokens: list[Token]) -> list[Token]:
-    """Given a list of tokens, extract macro definitions and expand macro references"""
-    macros: dict[str, list[Token]] = {}
-    macros, tokens = extract_macros(tokens)
-    c = 0
-    while check_macros(macros, tokens) and c < 10:
-        tokens = expand_macros(macros, tokens)
-        c += 1
     return tokens
 
 @dataclass
@@ -279,9 +284,9 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
             words.append(Word(OT.PUSH_INT, int(tok.value), tok, None))
         elif tok.typ == TT.WORD:
             if tok.value in STR_TO_KEYWORD:
-                words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[tok.value], tok, None))
+                words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[str(tok.value)], tok, None))
             elif tok.value in STR_TO_INTRINSIC:
-                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[tok.value], tok, None))
+                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[str(tok.value)], tok, None))
             elif len(words) and words[-1].operand == Keyword.PROC:
                 if tok.typ == TT.WORD:
                     words.append(Word(OT.PROC_NAME, tok.value, tok, None))
@@ -323,7 +328,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     while len(rwords):
         word = rwords.pop()
         if word.operand != Keyword.PROC:
-            print(word)
             compiler_error(word.tok, f"Expected `proc` keyword")
             sys.exit(1)
         if len(rwords):
@@ -357,7 +361,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                     sys.exit(1)
 
                 mem_buf[mem_name] = mem_size
-                print(mem_name, mem_size)
             else:
                 rwords.append(word)
                 break
@@ -460,7 +463,6 @@ def crossreference_proc(proc: Proc) -> None:
 
     if len(stack) != 0:
       compiler_error(proc.words[stack.pop()].tok, f"Unclosed block")
-      print(stack)
       sys.exit(1)
 
 def compile_push_pop_functions(out: TextIOWrapper):
@@ -511,7 +513,7 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc):
         elif word.typ == OT.PROC_CALL:
             out.write(f"  call void() @proc_{word.operand}()\n")
         elif word.typ == OT.PUSH_MEMORY:
-            memory = word.operand
+            memory = str(word.operand)
             if memory in proc.memories:
                 out.write(f"  %ptrto_{memory}_{c} = ptrtoint [{proc.memories[memory]} x i8]* %mem_{memory} to i64\n")
                 out.write(f"  call void(i64) @push(i64 %ptrto_{memory}_{c})\n")
@@ -699,12 +701,10 @@ def compile_program_to_ll(program: Program, out_file_path: str):
         for proc_name in program.procs:
             if proc_name == "main":
                 found_main = True
-            else:
-                print(proc_name, "HHH")
             compile_proc_to_ll(out, proc_name, program.procs[proc_name])
 
         if not found_main:
-            err_tok = Token(TT.WORD, "", program.file_path, 0, 0, [])
+            err_tok = Token(TT.WORD, "", program.file_path, 0, 0)
             compiler_error(err_tok, "No entry point found (expected `proc main ...`)")
             sys.exit(1)
         else:
@@ -754,7 +754,7 @@ def main():
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
-        toks = preprocess_macros(toks)
+        toks = preprocess_consts(toks)
         words = parse_tokens_into_words(toks)
         # print(repr_program(program))
         program: Program = parse_words_into_program(src_path, words)
