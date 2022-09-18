@@ -68,7 +68,7 @@ def parse_spec(spec_path: str) -> TestSpec:
     return spec
 
 def run_echoed(cmd: list[str], print_outs: bool=False):
-    print(f" {'' if print_outs else '(silenced) ' }$ {' '.join(cmd)}")
+    print(f"<CMD> {' '.join(cmd)}")
     run_res = subprocess.run(cmd, capture_output=True)
     if print_outs:
         out = run_res.stdout.decode("utf-8")
@@ -150,10 +150,6 @@ def test_output(res: TestResult) -> list[Problem]:
         )
     )
 
-    if len(probs):
-        print("-> failed")
-    else:
-        print("-> passed")
     return probs
 
 def test_specfile(fp: str) -> list[Problem]:
@@ -172,7 +168,7 @@ def main():
     specs = find_specfiles()
     probs = []
     for spec in specs:
-        print(f"> Testing spec `{spec}`")
+        print(f"<INFO> Testing spec `{spec}`")
         probs.extend(test_specfile(spec))
 
     print(f"==> {len(specs)} spec(s) tested; {len(probs)} failed")
