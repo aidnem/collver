@@ -1,0 +1,3 @@
+proc main
+  "Hello, world!\n" puts
+end

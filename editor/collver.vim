@@ -19,11 +19,11 @@ syntax keyword collverKeywords if elif else while do proc const end memory
 " Comments
 syntax region collverCommentLine start="//" end="$"   contains=collverTodos
 
-" TODO: Implement String literals
-" syntax region collverString start=/\v"/ skip=/\v\\./ end=/\v"/ contains=collverEscapes
+" String literals
+syntax region collverString start=/\v"/ skip=/\v\\./ end=/\v"/ contains=collverEscapes
 
-" See above TODO. Escape literals \n, \r, ....
-" syntax match collverEscapes display contained "\\[nr\"']"
+" Escape literals \n, \r, ....
+syntax match collverEscapes display contained "\\[nr\"']"
 
 " Number literals
 syntax region collverNumber start=/\s\d/ skip=/\d/ end=/\s/

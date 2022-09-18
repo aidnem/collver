@@ -13,8 +13,9 @@ def run_echoed(cmd):
     subprocess.run(cmd)
 
 class TT(Enum):
-    INT  = auto()
-    WORD = auto()
+    INT    = auto()
+    STRING = auto()
+    WORD   = auto()
 
 @dataclass
 class Token:
@@ -27,6 +28,7 @@ class Token:
 class OT(Enum):
     """Operation Types of words"""
     PUSH_INT    = auto()
+    PUSH_STR    = auto()
     KEYWORD     = auto()
     MEMORY_NAME = auto()
     PUSH_MEMORY = auto()
@@ -63,6 +65,7 @@ class Intrinsic(Enum):
     DUP     = auto()
     DROP    = auto()
     PRINT   = auto()
+    PUTS    = auto()
     STORE8  = auto()
     LOAD8   = auto()
     STORE64 = auto()
@@ -96,21 +99,41 @@ def lex_line(line: str) -> list[tuple[int, str]]:
     # project ;).
     buffer = ""
     start_idx = 0
+    in_str = False
     chunks: list[tuple[int, str]] = []
     for idx, c in enumerate(line):
-        if c == " " or c == "\n":
-            if len(buffer) != 0:
+        if in_str:
+            if c == '"':
+                buffer += c
                 chunks.append((start_idx, buffer))
                 buffer = ""
-        elif c == "/" and buffer == "/":
-            buffer = ""
-            break
-        else:
-            if len(buffer) == 0:
-                start_idx = idx
-                buffer = c
+                in_str = False
             else:
-                buffer += c
+                if buffer[-1] == "\\" and c == "n":
+                    buffer += "0A"
+                elif buffer[-1] == "\\" and c == "r":
+                    buffer += "0D"
+                else:
+                    buffer += c
+        else:
+            if c == " " or c == "\n":
+                if len(buffer) != 0:
+                    chunks.append((start_idx, buffer))
+                    buffer = ""
+            elif c == '"':
+                if len(buffer) == 0:
+                    start_idx = idx
+                    buffer = c
+                    in_str = True
+            elif c == "/" and buffer == "/":
+                buffer = ""
+                break
+            else:
+                if len(buffer) == 0:
+                    start_idx = idx
+                    buffer = c
+                else:
+                    buffer += c
 
     if len(buffer) != 0:
         chunks.append((start_idx, buffer))
@@ -119,7 +142,7 @@ def lex_line(line: str) -> list[tuple[int, str]]:
 
 def lex_file(file_path) -> list[Token]:
     """Lex a file, returning Tokens including the tokens location, type, and value"""
-    assert len(TT) == 2, "Exhaustive handling of Token Types in lex_file()"
+    assert len(TT) == 3, "Exhaustive handling of Token Types in lex_file()"
     toks: list[Token] = []
     with open(file_path, "r") as f:
         for (row, line) in enumerate(f.readlines()):
@@ -128,8 +151,12 @@ def lex_file(file_path) -> list[Token]:
                     val: int|str = int(string)
                     typ = TT.INT
                 except ValueError:
-                    val = string
-                    typ = TT.WORD
+                    if string[0] == '"' and string[-1] == '"':
+                        val = string[1:-1]
+                        typ = TT.STRING
+                    else:
+                        val = string
+                        typ = TT.WORD
                 tok = Token(typ=typ, value=val, file=file_path, row=row, col=col)
                 toks.append(tok)
     return toks
@@ -147,7 +174,7 @@ STR_TO_KEYWORD: dict[str, Keyword] = {
     "end": Keyword.END,
 }
 
-assert len(Intrinsic) == 20, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
+assert len(Intrinsic) == 21, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
 STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "+": Intrinsic.PLUS,
     "-": Intrinsic.MINUS,
@@ -165,6 +192,7 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "dup": Intrinsic.DUP,
     "drop": Intrinsic.DROP,
     "print": Intrinsic.PRINT,
+    "puts": Intrinsic.PUTS,
     "!8": Intrinsic.STORE8,
     "@8": Intrinsic.LOAD8,
     "!64": Intrinsic.STORE64,
@@ -261,18 +289,19 @@ def replace_consts(consts: dict[str, int], tokens: list[Token]) -> list[Token]:
             new_tokens.append(tok)
     return new_tokens
 
-def preprocess_consts(tokens: list[Token]) -> tuple[list[Token], dict[str, int]]:
+def preprocess_consts(tokens: list[Token]) -> list[Token]:
     """Given a list of tokens, extract const definitions and replace const references"""
     consts: dict[str, int] = {}
     consts, tokens = extract_consts(tokens)
     tokens = replace_consts(consts, tokens)
 
-    return tokens, consts
+    return tokens
 
 @dataclass
 class Proc:
     """A procedure (with local memory)"""
     memories: dict[str, int]
+    strings: dict[int, str]
     words: list[Word]
 
 @dataclass
@@ -284,7 +313,7 @@ class Program:
 
 def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     """Given a list of tokens, convert them into compile-able words"""
-    assert len(OT) == 7, "Exhaustive handling of Op Types in parse_tokens_into_words()"
+    assert len(OT) == 8, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
     words: list[Word] = []
     proc_names: list[str] = []
@@ -292,8 +321,11 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
     while len(rtokens):
         tok = rtokens.pop()
         if tok.typ == TT.INT:
-            assert type(tok.value) == int, "INT token had non-int value"
-            words.append(Word(OT.PUSH_INT, int(tok.value), tok, None))
+            assert isinstance(tok.value, int), "INT token had non-int value"
+            words.append(Word(OT.PUSH_INT, tok.value, tok, None))
+        elif tok.typ == TT.STRING:
+            assert isinstance(tok.value, str), "STRING token had non-string value"
+            words.append(Word(OT.PUSH_STR, tok.value, tok, None))
         elif tok.typ == TT.WORD:
             if tok.value in STR_TO_KEYWORD:
                 words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[str(tok.value)], tok, None))
@@ -377,7 +409,17 @@ def eval_memory_size(rwords: list[Word], name_word: Word) -> int:
 
     return body_stack[0]
 
-def parse_words_into_program(file_path: str, words: list[Word], consts: dict[str, int]) -> Program:
+def get_strings(words: list[Word]) -> dict[int, str]:
+    """Given a sequence of words (the body of a `proc`), return the locations and values of all string literals within"""
+    strings: dict[int, str] = {}
+    for ip, word in enumerate(words):
+        if word.typ == OT.PUSH_STR:
+            assert isinstance(word.operand, str), "PUSH_STR word with non-str operand"
+            strings[ip] = word.operand
+
+    return strings
+
+def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     """Parse a series of words into a Program() object"""
     program = Program(file_path, {}, {})
     rwords = list(reversed(words))
@@ -425,7 +467,8 @@ def parse_words_into_program(file_path: str, words: list[Word], consts: dict[str
                 compiler_error(word.tok, f"Expected `end` keyword at end of proc, found nothing")
                 sys.exit(1)
 
-            program.procs[str(name_word.operand)] = Proc(mem_buf, word_buf)
+            strings = get_strings(word_buf)
+            program.procs[str(name_word.operand)] = Proc(mem_buf, strings, word_buf)
             word_buf = []
             mem_buf = {}
         elif word.typ == OT.KEYWORD and word.operand == Keyword.MEMORY:
@@ -449,8 +492,8 @@ def parse_words_into_program(file_path: str, words: list[Word], consts: dict[str
 
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
-    assert len(OT) == 7, "Exhaustive handling of Op Types in crossreference_proc()"
-    assert len(Intrinsic) == 20, "Exhaustive handling of Intrincics in crossreference_proc()"
+    assert len(OT) == 8, "Exhaustive handling of Op Types in crossreference_proc()"
+    assert len(Intrinsic) == 21, "Exhaustive handling of Intrincics in crossreference_proc()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
@@ -551,6 +594,16 @@ def compile_print_function(out: TextIOWrapper):
     out.write("declare i64 @printf(i8*, ...)\n")
     out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
 
+def compile_puts_function(out: TextIOWrapper):
+    """Write the LLVM IR for the puts intrinsic word function to an open()ed file"""
+    out.write("@intrinsic_puts_fmt = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n")
+    out.write("define void @intrinsic_puts(ptr %strptr) {\n")
+    # out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0\n")
+    out.write(f"  call i64(i8*, ...) @printf(i8* @intrinsic_puts_fmt, ptr %strptr)\n")
+    out.write(f"  ret void\n")
+    out.write("}\n")
+    # out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
+
 def compile_global_memories(out: TextIOWrapper, memories: dict[str, int]):
     """Write the LLVM IR for global memories to an open()ed file"""
     for memory in memories:
@@ -558,14 +611,50 @@ def compile_global_memories(out: TextIOWrapper, memories: dict[str, int]):
         out.write(f"; global memory {memory} {mem_size}\n")
         out.write(f"@global_mem_{memory} = global [{mem_size} x i8] zeroinitializer\n") # Memories are in number of bytes
 
+def escaped_strlen(val: str) -> int:
+    """Given a string, calculate the length of it, counting \\0A/\\0D as one character"""
+    rval = list(reversed(list(val)))
+    res: int = 0
+    while len(rval):
+        c = rval.pop()
+        if c == "\\":
+            if len(rval) >= 2:
+                a = rval.pop()
+                b = rval.pop()
+                if a == "0" and b in ("A", "B"):
+                    res += 1
+                else:
+                    res += 2
+        else:
+            res += 1
+
+    return res
+
+def compile_string_literals_outer(out: TextIOWrapper, proc_name: str, strings: dict[int, str]):
+    """Write the LLVM IR for string literals within a `proc` to an open()ed file"""
+    for str_ip in strings:
+        strvalue = strings[str_ip]
+        rlen = escaped_strlen(strvalue)
+        out.write(f"@str_{proc_name}_{str_ip} = private unnamed_addr constant [{rlen + 1} x i8] c\"{strvalue}\\00\"\n")
+
+def compile_string_literals_inner(out: TextIOWrapper, proc_name: str, strings: dict[int, str]):
+    """Write the LLVM IR for pointers to string literals within a `proc` to an open()ed file"""
+    for str_ip in strings:
+        out.write(f"  %strptr{str_ip} = ptrtoint ptr @str_{proc_name}_{str_ip} to i64\n")
+        # out.write(f"  store ptr @str_{proc_name}_{str_ip}, ptr %strptr{str_ip}\n")
+        # out.write(f"  %strptr{str_ip} = getelementptr inbounds [{strlen + 1} x i8], ptr %str_{str_ip}, i64 0, i64 0\n") # Get the first element
+        # out.write(f"  store ptr @str_{proc_name}_{str_ip}, ptr %strptr{str_ip}\n") # Store the pointer to the string from outside in that pointer
+
 def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_memories: dict[str, int]):
     """Write LLVM IR for a procedure to an open()ed file"""
-    assert len(OT) == 7, "Exhaustive handling of Op Types in compile_proc_to_ll()"
-    assert len(Intrinsic) == 20, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
+    assert len(OT) == 8, "Exhaustive handling of Op Types in compile_proc_to_ll()"
+    assert len(Intrinsic) == 21, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
+    compile_string_literals_outer(out, proc_name, proc.strings)
     out.write(f"define void @proc_{proc_name}() ")
     out.write("{\n")
     out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0\n")
+    compile_string_literals_inner(out, proc_name, proc.strings)
     for memory in proc.memories:
         mem_size = proc.memories[memory]
         out.write(f"  ; memory {memory} {mem_size}\n")
@@ -575,8 +664,11 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
     for ip, word in enumerate(proc.words):
         out.write(f"  ; {str(word)}\n")
         if word.typ == OT.PUSH_INT:
-            assert type(word.operand) == int, "PUSH_INT word has non-int type"
+            assert isinstance(word.operand, int), "PUSH_INT word has non-int type"
             out.write(f"  call void(i64) @push(i64 {word.operand})\n")
+        elif word.typ == OT.PUSH_STR:
+            # out.write(f"  %ptrto_str_{c} = ptrtoint ptr %strptr{ip} to i64\n") # Cast that pointer to an i64
+            out.write(f"  call void(i64) @push(i64 %strptr{ip})\n") # Push that i64
         elif word.typ == OT.PROC_CALL:
             out.write(f"  call void() @proc_{word.operand}()\n")
         elif word.typ == OT.PUSH_MEMORY:
@@ -721,6 +813,11 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
                 out.write(f"  %a{c} = call i64() @pop()\n")
                 out.write(f"  call i64(i8*, ...) @printf(i8* %fmtptr, i64 %a{c})\n")
                 c += 1
+            elif word.operand == Intrinsic.PUTS:
+                out.write(f"  %str_int{c} = call i64() @pop()\n")
+                out.write(f"  %str_ptr{c} = inttoptr i64 %str_int{c} to ptr\n")
+                out.write(f"  call i32 @intrinsic_puts(ptr noundef %str_ptr{c})\n")
+                c += 1
             elif word.operand == Intrinsic.STORE8: # int ptr ->
                 out.write(f"  %ptr_int{c} = call i64() @pop()\n") # The pointer is on top of the stack
                 out.write(f"  %a{c} = call i64() @pop()\n")
@@ -769,6 +866,7 @@ def compile_program_to_ll(program: Program, out_file_path: str):
     with open(out_file_path, "w+") as out:
         compile_push_pop_functions(out)
         compile_print_function(out)
+        compile_puts_function(out)
         compile_global_memories(out, program.memories)
         found_main = False
         for proc_name in program.procs:
@@ -827,10 +925,10 @@ def main():
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
-        toks, consts = preprocess_consts(toks)
+        toks = preprocess_consts(toks)
         words = parse_tokens_into_words(toks)
         # print(repr_program(program))
-        program: Program = parse_words_into_program(src_path, words, consts)
+        program: Program = parse_words_into_program(src_path, words)
         for proc in program.procs:
             crossreference_proc(program.procs[proc])
         # for proc in program.procs:
