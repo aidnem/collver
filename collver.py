@@ -289,6 +289,49 @@ def replace_consts(consts: dict[str, int], tokens: list[Token]) -> list[Token]:
             new_tokens.append(tok)
     return new_tokens
 
+def preprocess_includes(tokens: list[Token], included_files: list[str]) -> list[Token]:
+    """Given a list of tokens, extract `include`s and replace them with the contents of the included file"""
+    rtokens = list(reversed(tokens))
+    new_tokens = []
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.WORD and tok.value == "include":
+            if len(rtokens):
+                file_tok = rtokens.pop()
+            else:
+                compiler_error(tok, "Expected string (name of included file), found EOF")
+                sys.exit(1)
+
+            if file_tok.typ == TT.STRING:
+                src_path = str(file_tok.value)
+                if src_path in included_files:
+                    continue
+
+                included_files.append(src_path)
+                try:
+                    print(f"[INFO] Including file {src_path}")
+                    included_toks = lex_file(src_path)
+                except FileNotFoundError:
+                    try:
+                        this_folder = os.path.split(__file__)[0]
+                        std_path = os.path.join(this_folder, "std", src_path)
+                        src_path = std_path
+                        included_toks = lex_file(src_path)
+                    except FileNotFoundError:
+                        compiler_error(file_tok, f"ERROR: Included file `{os.path.basename(src_path)}` not found!")
+                        sys.exit(1)
+
+                new_tokens.extend(included_toks)
+            else:
+                compiler_error(tok, "Name of included file must be a string")
+                sys.exit(1)
+        else:
+            new_tokens.append(tok)
+
+    if len(new_tokens) > len(tokens):
+        new_tokens = preprocess_includes(new_tokens, included_files)
+    return new_tokens
+
 def preprocess_consts(tokens: list[Token]) -> list[Token]:
     """Given a list of tokens, extract const definitions and replace const references"""
     consts: dict[str, int] = {}
@@ -920,11 +963,13 @@ def main():
         ll_path = exec_path + ".ll"
     if command != "from-ll":
         try:
+            print(f"[INFO] Compiling file {src_path}")
             toks = lex_file(src_path)
         except FileNotFoundError:
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
+        toks = preprocess_includes(toks, [])
         toks = preprocess_consts(toks)
         words = parse_tokens_into_words(toks)
         # print(repr_program(program))

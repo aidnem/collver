@@ -1,0 +1,83 @@
+// CONSTANTS
+
+const sizeof(byte) 1 end
+const sizeof(int) sizeof(byte) 8 * end
+
+// STACK MANIPULATION
+
+proc swap // a b -> b a
+  memory a 8 end
+  memory b 8 end
+  b !64
+  a !64
+  b @64
+  a @64
+end
+
+proc over // a b -> a b a
+  memory a 8 end
+  memory b 8 end
+  b !64
+  a !64
+  a @64
+  b @64
+  a @64
+end
+
+// MEMORY MANIPULATION
+
+proc inc64 // ptr ->
+    dup
+    @64
+    1 +
+    swap // pointer comes second for !
+    !64
+end
+
+proc dec64 // ptr ->
+    dup
+    @64
+    1 -
+    swap // pointer comes second for !
+    !64
+end
+
+proc memcpy // size src dst ->
+  memory size 8 end
+  memory src 8 end
+  memory dst 8 end
+  dst !64
+  src !64
+  size !64
+
+  0 while dup size @64 < do
+    dup  src @64 + @8
+    over dst @64 + !8
+    1 +
+  end drop
+end
+
+// STRING MANIPULATION
+
+proc strlen // ptr -> int
+    memory len 8 end
+    0 len !64
+
+    while dup len @64 +  @8 do
+       len inc64
+    end drop
+
+    len @64
+end
+
+proc strcpy // src dest ->
+  memory src 8 end
+  memory dst 8 end
+  // len(src) src dst
+  dst !64
+  dup src !64 // keep src on stack
+  dup strlen
+  swap
+  dst @64
+  memcpy
+end

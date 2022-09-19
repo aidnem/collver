@@ -1,3 +1,5 @@
+include "std.collver"
+
 memory global_bytes 3 end
 
 proc write_mem
@@ -13,7 +15,7 @@ proc read_mem
 end
 
 proc main
-  memory local_i64 8 end
+  memory local_i64 sizeof(int) end
   2 16 <<
   1 +
   local_i64 !64
