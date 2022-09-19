@@ -14,7 +14,14 @@ set iskeyword=a-z,A-Z,-,*,_,!,@
 syntax keyword collverTodos TODO FIXME NOTE
 
 " Language keywords
-syntax keyword collverKeywords if elif else while do proc const end memory include
+syntax keyword collverKeywords proc end
+syntax keyword collverControlFlow if elif else while do
+
+" Preprocessor keywords
+syntax keyword collverPreProc memory const include
+
+" Intrinsic words
+syntax keyword collverIntrinsics + - * / % = != > < >= <= << >> dup drop print puts !8 @8 !64 @64 alloc free
 
 " Comments
 syntax region collverCommentLine start="//" end="$"   contains=collverTodos
@@ -31,6 +38,9 @@ syntax region collverNumber start=/\s\d/ skip=/\d/ end=/\s/
 " Set highlights
 highlight default link collverTodos Todo
 highlight default link collverKeywords Keyword
+highlight default link collverControlFlow Conditional
+highlight default link collverPreProc PreProc
+highlight default link collverIntrinsics Operator
 highlight default link collverCommentLine Comment
 highlight default link collverString String
 highlight default link collverNumber Number
