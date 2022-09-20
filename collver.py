@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from io import TextIOWrapper
 from typing import Optional
-import copy
 import subprocess
 import os
 import sys
@@ -70,6 +69,8 @@ class Intrinsic(Enum):
     LOAD8   = auto()
     STORE64 = auto()
     LOAD64  = auto()
+    ALLOC   = auto()
+    FREE    = auto()
 
 @dataclass
 class Word:
@@ -174,7 +175,7 @@ STR_TO_KEYWORD: dict[str, Keyword] = {
     "end": Keyword.END,
 }
 
-assert len(Intrinsic) == 21, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
+assert len(Intrinsic) == 23, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
 STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "+": Intrinsic.PLUS,
     "-": Intrinsic.MINUS,
@@ -197,6 +198,8 @@ STR_TO_INTRINSIC: dict[str, Intrinsic] = {
     "@8": Intrinsic.LOAD8,
     "!64": Intrinsic.STORE64,
     "@64": Intrinsic.LOAD64,
+    "alloc": Intrinsic.ALLOC,
+    "free": Intrinsic.FREE,
 }
 
 
@@ -283,7 +286,6 @@ def replace_consts(consts: dict[str, int], tokens: list[Token]) -> list[Token]:
         tok = rtokens.pop()
         if tok.typ == TT.WORD and tok.value in consts:
             new_tok = Token(TT.INT, consts[str(tok.value)], tok.file, tok.row, tok.col)
-            print(new_tok)
             new_tokens.append(new_tok)
         else:
             new_tokens.append(tok)
@@ -536,7 +538,7 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in crossreference_proc()"
-    assert len(Intrinsic) == 21, "Exhaustive handling of Intrincics in crossreference_proc()"
+    assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in crossreference_proc()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
@@ -647,6 +649,11 @@ def compile_puts_function(out: TextIOWrapper):
     out.write("}\n")
     # out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
 
+def compile_alloc_free_functions(out: TextIOWrapper):
+    """Write the LLVM IR for the `alloc` and `free` intrinsics to an open()ed file"""
+    out.write(f"declare noalias ptr @malloc(i64 noundef)\n")
+    out.write(f"declare void @free(ptr noundef)\n")
+
 def compile_global_memories(out: TextIOWrapper, memories: dict[str, int]):
     """Write the LLVM IR for global memories to an open()ed file"""
     for memory in memories:
@@ -691,7 +698,7 @@ def compile_string_literals_inner(out: TextIOWrapper, proc_name: str, strings: d
 def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_memories: dict[str, int]):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in compile_proc_to_ll()"
-    assert len(Intrinsic) == 21, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
+    assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
     compile_string_literals_outer(out, proc_name, proc.strings)
     out.write(f"define void @proc_{proc_name}() ")
@@ -888,6 +895,21 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
                 # out.write(f"  %c_i64{c} = sext i8 %c_i8{c} to i64\n")
                 out.write(f"  call void(i64) @push(i64 %c_i64{c})\n")
                 c += 1
+            elif word.operand == Intrinsic.ALLOC: # int -> ptr
+                out.write(f"  %size_{c} = call i64() @pop()\n") # -> The pointer
+                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 69)\n")
+                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 %size_{c})\n")
+                out.write(f"  %ptr_{c} = call ptr @malloc(i64 %size_{c})\n")
+                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 420)\n")
+                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, ptr %ptr_{c})\n")
+                out.write(f"  %int_{c} = ptrtoint ptr %ptr_{c} to i64\n")
+                out.write(f"  call void(i64) @push(i64 %int_{c})\n")
+                c += 1
+            elif word.operand == Intrinsic.FREE: # ptr ->
+                out.write(f"  %int_{c} = call i64() @pop()\n") # -> The pointer
+                out.write(f"  %ptr_{c} = inttoptr i64 %int_{c} to ptr\n")
+                out.write(f"  call void @free(ptr %ptr_{c})\n")
+                c += 1
             else:
                 assert False, f"Unknown Intrinsic {word}"
         else:
@@ -910,6 +932,7 @@ def compile_program_to_ll(program: Program, out_file_path: str):
         compile_push_pop_functions(out)
         compile_print_function(out)
         compile_puts_function(out)
+        compile_alloc_free_functions(out)
         compile_global_memories(out, program.memories)
         found_main = False
         for proc_name in program.procs:
@@ -972,6 +995,7 @@ def main():
         toks = preprocess_includes(toks, [])
         toks = preprocess_consts(toks)
         words = parse_tokens_into_words(toks)
+        # print('\n'.join([str(word) for word in words]))
         # print(repr_program(program))
         program: Program = parse_words_into_program(src_path, words)
         for proc in program.procs:

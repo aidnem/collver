@@ -1,0 +1,35 @@
+include "std.collver"
+
+proc main
+  const arrlen 16 end
+  // Allocate the sizeof a pointer (basically a void* variable)
+  memory arr sizeof(ptr) end
+  // Allocate the sizeof 16 ints and store that pointer in `arr`
+  sizeof(int) arrlen * alloc arr !64
+
+  // Write the numbers 0-arrlen to the memory we allocated
+  0 while dup sizeof(int) arrlen * < do
+    // Find the pointer to the correct element
+    dup arr @64 +
+    // Get which number we're writing (0-arrlen)
+    over sizeof(int) /
+    // Swap and write (!64 accepts [value ptr] not [ptr value])
+    swap !64
+    // Increment the iterator
+    sizeof(int) +
+  end
+
+  // Read the numbers from arr and print them
+  0 while dup sizeof(int) arrlen * < do
+    // Find the pointer to the correct element
+    dup arr @64 +
+    // Read the number from that pointer and print it
+    @64 print
+    // Increment the iterator
+    sizeof(int) +
+  end
+
+  // Friends don't let friends not free their memory
+  arr @64 free
+end
+
