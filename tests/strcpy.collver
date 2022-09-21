@@ -1,0 +1,24 @@
+include "std.collver"
+
+memory a sizeof(ptr) end
+memory b sizeof(ptr) end
+
+// Print the strings at pointers stored in `a` and `b`
+proc dbg
+  a @64 puts
+  b @64 puts
+end
+
+proc main
+  // Create a string and make a copy of that string
+  "abcd\n" dup a !64 // store a pointer to the string constant in `a`
+  strcpy b !64 // store a pointer to the new copy in `b`
+  dbg // Print the current status
+
+  // Increment the first letter of the copy (the pointer to which is stored at `b`)
+  b @64 // Load the pointer to the string from `b`
+  @8 1 + // Load the first character and increment it
+  b @64 // Load the pointer to the string from `b`
+  !8 // Write that new number to the first byte of the string
+  dbg // Print the current status
+end

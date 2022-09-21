@@ -71,14 +71,17 @@ proc strlen // ptr -> int
     len @64
 end
 
-proc strcpy // src dest ->
+proc strcpy // src ->
   memory src 8 end
+  memory len 8 end
   memory dst 8 end
-  // len(src) src dst
-  dst !64
-  dup src !64 // keep src on stack
-  dup strlen
-  swap
-  dst @64
-  memcpy
+  // src = src
+  // len = len(src)
+  // dst = dst
+
+  dup src !64 // Keep src on the stack for the next step
+  strlen dup len !64 // Keep len(src) on the stack for the next step
+  alloc dst !64
+  len @64 src @64 dst @64 memcpy
+  dst @64 // 'return' the destination pointer
 end
