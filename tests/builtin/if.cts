@@ -1,5 +1,3 @@
-[!FILE]
-if.collver
 [!COMERR]
 [!STDOUT]
 1

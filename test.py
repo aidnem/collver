@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import os
+import sys
 import glob
 import subprocess
 
@@ -49,14 +50,12 @@ def parse_spec(spec_path: str) -> TestSpec:
         lines = f.readlines()
 
     rlines = list(reversed(lines))
+    spec_basename = os.path.splitext(spec_path)[0]
+    collver_file_path = spec_basename + ".collver"
+    spec.file_path = collver_file_path
     while len(rlines):
         line = rlines.pop()
-        if line == "[!FILE]\n":
-            spec_folder = os.path.split(spec_path)[0]
-            file_line = rlines.pop().strip()
-            file_path = os.path.join(spec_folder, file_line)
-            spec.file_path = file_path
-        elif line == "[!COMERR]\n":
+        if line == "[!COMERR]\n":
             spec.compiler_stderr = eat_chunk(rlines).encode("utf-8")
         elif line == "[!STDIN]\n":
             spec.provided_input = eat_chunk(rlines)
@@ -158,22 +157,65 @@ def test_specfile(fp: str) -> list[Problem]:
     probs = test_output(res)
     return probs
 
-def find_specfiles() -> list[str]:
-    """Find specfiles in the ./tests/ folder"""
-    specs = [str(g) for g in glob.glob("./tests/*.cts")]
-    print(f"==> Found {len(specs)} spec(s)")
+def find_specfiles(subfolder: str) -> list[str]:
+    """Find specfiles in the ./tests/<folder>/ folder"""
+    path = os.path.join("./tests", subfolder, "*.cts")
+    specs = [str(g) for g in glob.glob(path)]
     return specs
 
-def main():
-    specs = find_specfiles()
-    probs = []
-    for spec in specs:
-        print(f"<INFO> Testing spec `{spec}`")
-        probs.extend(test_specfile(spec))
+def clean_spec(spec: str, quiet=False):
+    """Delete byproducts (results of compilation) of a spec, given the path"""
+    print(f"<INFO> Cleaning byproducts of spec `{spec}`")
+    bin_path = os.path.splitext(spec)[0]
+    ll_path = bin_path + ".ll"
+    s_path = bin_path + ".s"
+    if os.path.exists(bin_path) or os.path.exists(ll_path) or os.path.exists(s_path):
+        if os.path.exists(ll_path):
+            if not quiet:
+                print(f"<rm> {ll_path}")
+            os.remove(ll_path)
+        if os.path.exists(s_path):
+            if not quiet:
+                print(f"<rm> {s_path}")
+            os.remove(s_path)
+        if os.path.exists(bin_path):
+            if not quiet:
+                print(f"<rm> {bin_path}")
+            os.remove(bin_path)
+    elif not quiet:
+        print(f"No byproducts found")
 
-    print(f"==> {len(specs)} spec(s) tested; {len(probs)} failed")
-    for prob in probs:
-        print_problem(prob)
+def main():
+    if len(sys.argv) < 2:
+        print("Usage:\n  $ python3.10 test.py {all|std|builtin|clean} [-clean]\n")
+        sys.exit(1)
+    subcommand = sys.argv[1]
+    match subcommand:
+        case "all" | "std" | "builtin":
+            if subcommand == "all":
+                specs = find_specfiles("builtin")
+                specs.extend(find_specfiles("std"))
+            else:
+                specs = find_specfiles(subcommand)
+            print(f"==> Found {len(specs)} spec(s)")
+            probs = []
+            for spec in specs:
+                print(f"<INFO> Testing spec `{spec}`")
+                probs.extend(test_specfile(spec))
+                if "-clean" in sys.argv:
+                    clean_spec(spec, quiet=True)
+
+            print(f"==> {len(specs)} spec(s) tested; {len(probs)} failed")
+            for prob in probs:
+                print_problem(prob)
+        case "clean":
+            specs = find_specfiles("builtin")
+            specs.extend(find_specfiles("std"))
+            for spec in specs:
+                clean_spec(spec)
+        case _:
+            print(f"ERROR: Unknown subcommand `{subcommand}`")
+            sys.exit(1)
 
 if __name__ == '__main__':
     main()

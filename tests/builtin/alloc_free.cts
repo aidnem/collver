@@ -1,5 +1,3 @@
-[!FILE]
-alloc_free.collver
 [!STDOUT]
 0
 1

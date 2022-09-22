@@ -1,5 +1,3 @@
-[!FILE]
-math.collver
 [!STDOUT]
 16
 64

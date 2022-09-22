@@ -1,0 +1,2 @@
+[!STDOUT]
+Hello, world!

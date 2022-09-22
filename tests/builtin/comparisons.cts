@@ -1,5 +1,3 @@
-[!FILE]
-comparisons.collver
 [!STDOUT]
 1
 0
