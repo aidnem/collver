@@ -21,4 +21,6 @@ proc main
   b @64 // Load the pointer to the string from `b`
   !8 // Write that new number to the first byte of the string
   dbg // Print the current status
+
+  "beginning " "end\n" strconcat puts
 end

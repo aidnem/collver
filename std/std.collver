@@ -28,22 +28,25 @@ end
 // MEMORY MANIPULATION
 
 proc inc64 // ptr ->
-    dup
-    @64
-    1 +
-    swap // pointer comes second for !
-    !64
+  // Given a pointer to an i64, increment the value stored there
+  dup
+  @64
+  1 +
+  swap // pointer comes second for !
+  !64
 end
 
 proc dec64 // ptr ->
-    dup
-    @64
-    1 -
-    swap // pointer comes second for !
-    !64
+  // Given a pointer to an i64, decrement the value stored there
+  dup
+  @64
+  1 -
+  swap // pointer comes second for !
+  !64
 end
 
 proc memcpy // size src dst ->
+  // Copies `size` number of bytes from address `src` to address `dst`
   memory size 8 end
   memory src 8 end
   memory dst 8 end
@@ -61,17 +64,20 @@ end
 // STRING MANIPULATION
 
 proc strlen // ptr -> int
-    memory len 8 end
-    0 len !64
+  // Given a pointer to a string, return its length
+  // NOTE: Only works on null-terminated strings (string literals are null-terminated, but strings created at runtime may not be, so be careful)
+  memory len 8 end
+  0 len !64
 
-    while dup len @64 +  @8 do
-       len inc64
-    end drop
+  while dup len @64 +  @8 do
+     len inc64
+  end drop
 
-    len @64
+  len @64
 end
 
-proc strcpy // src ->
+proc strcpy // src -> ptr
+  // Given a pointer to a string, make a copy of it, returning the pointer to the new string
   memory src 8 end
   memory len 8 end
   memory dst 8 end
@@ -84,4 +90,32 @@ proc strcpy // src ->
   alloc dst !64
   len @64 src @64 dst @64 memcpy
   dst @64 // 'return' the destination pointer
+end
+
+proc strconcat // str1 str2 -> str3
+  // Concatenate two strings, returning the pointer to the new string
+  memory str1 sizeof(ptr) end
+  memory len_str1 sizeof(int) end
+  memory str2 sizeof(ptr) end
+  memory len_str2 sizeof(int) end
+  memory dst sizeof(ptr) end
+  dup str2 !64 strlen len_str2 !64 // Store the length and pointer to str2 in memory
+  dup str1 !64 strlen len_str1 !64 // Store the length and pointer to str1 in memory
+  len_str1 @64 len_str2 @64 + alloc dst !64 // Sum the lengths of the two strings and allocate that many bytes, storing the pointer in dst
+  len_str1 @64 str1 @64 dst @64 memcpy // Copy str1 to the beginning of the new memory (memcpy requires a length so we need len_str1 at the beginning)
+  len_str2 @64 str2 @64 dst @64 len_str1 @64 + memcpy // Add the length of str1 to the pointer and copy str2 to there
+  dst @64 // Return the pointer to the new, concatenated string
+end
+
+proc strconcat_d // str1 str2 -> str3
+  // Exact same as for strconcat, but it frees the original two strings afterwards
+  // NOTE: ONLY FOR STRINGS THAT HAVE BEEN DYNAMICALLY ALLOCATED WITH THE `alloc` WORD
+  memory str2 sizeof(ptr) end
+  memory str1 sizeof(ptr) end
+  str2 !64
+  dup str1 !64
+  str2 @64
+  strconcat
+  str1 @64 free
+  str2 @64 free
 end
