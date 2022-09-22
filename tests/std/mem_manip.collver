@@ -1,0 +1,11 @@
+include "std.collver"
+
+proc main
+  memory int1 sizeof(int) end
+  memory int2 sizeof(int) end
+  64 int1 !64
+  int1 dup inc64 @64 print
+  int1 dup dec64 @64 print
+  8 int1 int2 memcpy
+  int2 @64 print
+end

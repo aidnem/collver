@@ -1,0 +1,7 @@
+include "std.collver"
+
+proc main
+  sizeof(byte) print
+  sizeof(int) print
+  sizeof(ptr) print
+end

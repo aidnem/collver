@@ -1,0 +1,6 @@
+include "std.collver"
+
+proc main
+  1 2 swap print print
+  "under\n" "over\n" over puts puts puts
+end
