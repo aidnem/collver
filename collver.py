@@ -18,11 +18,11 @@ class TT(Enum):
 
 @dataclass
 class Token:
-    typ   : TT                   # Token type (word or different values)
-    value : str | int            # Value (word str or int value)
-    file  : str                  # File that the token originated in
-    row   : int                  # Row that the token is on (0 indexed)
-    col   : int                  # Row that the token is on (0 indexed)
+    typ   : TT        # Token type (word or different values)
+    value : str | int # Value (word str or int value)
+    file  : str       # File that the token originated in
+    row   : int       # Row that the token is on (0 indexed)
+    col   : int       # Row that the token is on (0 indexed)
 
 class OT(Enum):
     """Operation Types of words"""
@@ -75,14 +75,18 @@ class Intrinsic(Enum):
 @dataclass
 class Word:
     """A word (instruction) in Collver"""
-    typ     : OT                                        # Type of token (for different syntaxes)
-    operand : Optional[int | str | Intrinsic | Keyword] # Value or type of keyword/intrinsic
-    tok     : Token                                     # Token that the word was derived from
-    jmp     : Optional[int]                             # Jump location for control flow words
+    typ     : OT                            # Type of token (for different syntaxes)
+    operand : Optional[int | str | Keyword] # Value or type of keyword/intrinsic
+    tok     : Token                         # Token that the word was derived from
+    jmp     : Optional[int]                 # Jump location for control flow words
 
 def pretty_loc(tok: Token) -> str:
     """Given a token, return a human-readable string containing its location"""
     return f"{tok.file}:{tok.row+1}:{tok.col+1}"
+
+def compiler_warning(tok: Token, msg: str) -> None:
+    """Print a warning at a location, DOES NOT EXIT AUTOMATICALLY"""
+    print(f"{pretty_loc(tok)}:WARNING: {msg}", file=sys.stderr)
 
 def compiler_error(tok: Token, msg: str) -> None:
     """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
@@ -390,7 +394,7 @@ def replace_aliases(aliases: dict[str, Token], tokens: list[Token]) -> list[Toke
     while len(rtokens):
         tok = rtokens.pop()
         if tok.typ == TT.WORD and tok.value in aliases:
-            alias_tok = aliases[tok.value]
+            alias_tok = aliases[str(tok.value)]
             new_tok = Token(alias_tok.typ, alias_tok.value, tok.file, tok.row, tok.col)
             new_tokens.append(new_tok)
         else:
@@ -417,13 +421,15 @@ class Program:
     """A program in intermediate representation"""
     file_path: str
     procs: dict[str, Proc]
+    extern_procs: list[str]
     memories: dict[str, int]
 
-def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
+def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]:
     """Given a list of tokens, convert them into compile-able words"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
     words: list[Word] = []
+    extern_procs: list[str] = []
     proc_names: list[str] = []
     mem_names: list[str] = []
     while len(rtokens):
@@ -437,8 +443,6 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
         elif tok.typ == TT.WORD:
             if tok.value in STR_TO_KEYWORD:
                 words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[str(tok.value)], tok, None))
-            elif tok.value in STR_TO_INTRINSIC:
-                words.append(Word(OT.INTRINSIC, STR_TO_INTRINSIC[str(tok.value)], tok, None))
             elif len(words) and words[-1].operand == Keyword.PROC:
                 if tok.typ == TT.WORD:
                     words.append(Word(OT.PROC_NAME, tok.value, tok, None))
@@ -458,12 +462,14 @@ def parse_tokens_into_words(tokens: list[Token]) -> list[Word]:
             elif tok.value in mem_names:
                     words.append(Word(OT.PUSH_MEMORY, tok.value, tok, None))
             else:
-                compiler_error(tok, f"Unknown word `{tok.value}`")
-                sys.exit(1)
+                if not str(tok.value).startswith("intrinsic_"):
+                    compiler_warning(tok, f"Unknown word `{tok.value}`, treating it like an external proc call")
+                words.append(Word(OT.PROC_CALL, tok.value, tok, None))
+                extern_procs.append(str(tok.value))
         else:
             assert False, f"Unkown token type {tok.typ}"
 
-    return words
+    return words, list(set(extern_procs))
 
 assert len(Keyword) == 8, "Exhaustive list of control flow words for BLOCK_STARTERS"
 BLOCK_STARTERS: list[Keyword] = [
@@ -529,7 +535,7 @@ def get_strings(words: list[Word]) -> dict[int, str]:
 
 def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     """Parse a series of words into a Program() object"""
-    program = Program(file_path, {}, {})
+    program = Program(file_path, {}, [], {})
     rwords = list(reversed(words))
     word_buf: list[Word] = []
     mem_buf: dict[str, int] = {}
@@ -589,7 +595,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
             mem_name = str(mem_name_word.operand)
 
             mem_size: int = eval_memory_size(rwords, mem_name_word)
-            print(f"<DEBUG> Found global memory {mem_name} of size {mem_size}")
             program.memories[mem_name] = mem_size
         else:
             compiler_error(word.tok, f"Expected `proc` or `memory` keywords")
@@ -678,44 +683,13 @@ def crossreference_proc(proc: Proc) -> None:
 
 def compile_push_pop_functions(out: TextIOWrapper):
     """Write the LLVM IR for the push and pop functions to an open()ed file"""
-    out.write("@stack = global [1024 x i64] undef\n")
-    out.write("@sp    = global i64 0\n")
-    out.write("define void @push(i64 %val) {\n")
-    out.write("  %sp = load i64, i64* @sp\n")
-    out.write("  %addr = getelementptr [1024 x i64], [1024 x i64]* @stack, i64 0, i64 %sp\n")
-    out.write("  store i64 %val, i64* %addr\n")
-    out.write("  %newsp = add i64 %sp, 1\n")
-    out.write("  store i64 %newsp, i64* @sp\n")
-    out.write("  ret void\n")
-    out.write("}\n")
-    out.write("define i64 @pop() {\n")
-    out.write("  %sp = load i64, i64* @sp\n")
-    out.write("  %topsp = sub i64 %sp, 1\n")
-    out.write("  %addr = getelementptr [1024 x i64], [1024 x i64]* @stack, i64 0, i64 %topsp\n")
-    out.write("  %val = load i64, i64* %addr\n")
-    out.write("  store i64 %topsp, i64* @sp\n")
-    out.write("  ret i64 %val\n")
-    out.write("}\n")
+    out.write("declare void @push(i64)\n")
+    out.write("declare i64 @pop()\n")
 
-def compile_print_function(out: TextIOWrapper):
-    """Write the LLVM IR for the print intrinsic word function to an open()ed file"""
-    out.write("declare i64 @printf(i8*, ...)\n")
-    out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
-
-def compile_puts_function(out: TextIOWrapper):
-    """Write the LLVM IR for the puts intrinsic word function to an open()ed file"""
-    out.write("@intrinsic_puts_fmt = private unnamed_addr constant [3 x i8] c\"%s\\00\"\n")
-    out.write("define void @intrinsic_puts(ptr %strptr) {\n")
-    # out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0\n")
-    out.write(f"  call i64(i8*, ...) @printf(i8* @intrinsic_puts_fmt, ptr %strptr)\n")
-    out.write(f"  ret void\n")
-    out.write("}\n")
-    # out.write("@fmt = private unnamed_addr constant [4 x i8] c\"%i\\0A\\00\"\n")
-
-def compile_alloc_free_functions(out: TextIOWrapper):
-    """Write the LLVM IR for the `alloc` and `free` intrinsics to an open()ed file"""
-    out.write(f"declare noalias ptr @malloc(i64 noundef)\n")
-    out.write(f"declare void @free(ptr noundef)\n")
+def compile_extern_procs(out: TextIOWrapper, procs: list[str]):
+    """Write the LLVM IR for declaring external processes to an open()ed file"""
+    for proc in procs:
+        out.write(f"declare void @proc_{proc}()\n")
 
 def compile_global_memories(out: TextIOWrapper, memories: dict[str, int]):
     """Write the LLVM IR for global memories to an open()ed file"""
@@ -754,19 +728,15 @@ def compile_string_literals_inner(out: TextIOWrapper, proc_name: str, strings: d
     """Write the LLVM IR for pointers to string literals within a `proc` to an open()ed file"""
     for str_ip in strings:
         out.write(f"  %strptr{str_ip} = ptrtoint ptr @str_{proc_name}_{str_ip} to i64\n")
-        # out.write(f"  store ptr @str_{proc_name}_{str_ip}, ptr %strptr{str_ip}\n")
-        # out.write(f"  %strptr{str_ip} = getelementptr inbounds [{strlen + 1} x i8], ptr %str_{str_ip}, i64 0, i64 0\n") # Get the first element
-        # out.write(f"  store ptr @str_{proc_name}_{str_ip}, ptr %strptr{str_ip}\n") # Store the pointer to the string from outside in that pointer
 
 def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_memories: dict[str, int]):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in compile_proc_to_ll()"
-    assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in compile_proc_to_ll()"
+    # assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in compile_proc_to_ll()" TODO: Verify that this assertion isn't necessary
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
     compile_string_literals_outer(out, proc_name, proc.strings)
     out.write(f"define void @proc_{proc_name}() ")
     out.write("{\n")
-    out.write("  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0\n")
     compile_string_literals_inner(out, proc_name, proc.strings)
     for memory in proc.memories:
         mem_size = proc.memories[memory]
@@ -780,7 +750,6 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
             assert isinstance(word.operand, int), "PUSH_INT word has non-int type"
             out.write(f"  call void(i64) @push(i64 {word.operand})\n")
         elif word.typ == OT.PUSH_STR:
-            # out.write(f"  %ptrto_str_{c} = ptrtoint ptr %strptr{ip} to i64\n") # Cast that pointer to an i64
             out.write(f"  call void(i64) @push(i64 %strptr{ip})\n") # Push that i64
         elif word.typ == OT.PROC_CALL:
             out.write(f"  call void() @proc_{word.operand}()\n")
@@ -828,153 +797,6 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
                 out.write(f"ls{ip}:\n") # Skip label
             else:
                 assert False, f"Unknown keyword {word}"
-        elif word.typ == OT.INTRINSIC:
-            assert type(word.operand) == Intrinsic, "Intrinsic word has non-intrinsic type"
-            if word.operand == Intrinsic.PLUS:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = add i64 %a{c}, %b{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.MINUS:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = sub i64 %b{c}, %a{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.MULT:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = mul i64 %a{c}, %b{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.DIV:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = sdiv i64 %b{c}, %a{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.MOD:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = srem i64 %b{c}, %a{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.EQ:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp eq i64 %a{c}, %b{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.NE:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp ne i64 %a{c}, %b{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.GT:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp sgt i64 %b{c}, %a{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.LT:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp slt i64 %b{c}, %a{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.GE:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp sge i64 %b{c}, %a{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.LE:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c_i1{c} = icmp sle i64 %b{c}, %a{c}\n")
-                out.write(f"  %c{c} = zext i1 %c_i1{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.SHL:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = shl i64 %b{c}, %a{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.SHR:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %b{c} = call i64() @pop()\n")
-                out.write(f"  %c{c} = lshr i64 %b{c}, %a{c}\n")
-                out.write(f"  call void(i64) @push(i64 %c{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.DUP:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  call void(i64) @push(i64 %a{c})\n")
-                out.write(f"  call void(i64) @push(i64 %a{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.DROP:
-                out.write(f"  call i64() @pop()\n")
-                c += 1
-            elif word.operand == Intrinsic.PRINT:
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  call i64(i8*, ...) @printf(i8* %fmtptr, i64 %a{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.PUTS:
-                out.write(f"  %str_int{c} = call i64() @pop()\n")
-                out.write(f"  %str_ptr{c} = inttoptr i64 %str_int{c} to ptr\n")
-                out.write(f"  call i32 @intrinsic_puts(ptr noundef %str_ptr{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.STORE8: # int ptr ->
-                out.write(f"  %ptr_int{c} = call i64() @pop()\n") # The pointer is on top of the stack
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %a_trunc{c} = trunc i64 %a{c} to i8\n") # Chop it down to i8 size so we can write it to a single byte
-                out.write(f"  %ptr_{c} = inttoptr i64 %ptr_int{c} to ptr\n")
-                out.write(f"  store i8 %a_trunc{c}, ptr %ptr_{c}\n")
-                c += 1
-            elif word.operand == Intrinsic.LOAD8: # ptr -> int
-                out.write(f"  %ptr_int{c} = call i64() @pop()\n") # -> The pointer
-                out.write(f"  %ptr_{c} = inttoptr i64 %ptr_int{c} to ptr\n")
-                out.write(f"  %c_i8{c} = load i8, ptr %ptr_{c}\n")
-                out.write(f"  %c_i64{c} = sext i8 %c_i8{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c_i64{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.STORE64: # int ptr ->
-                out.write(f"  %ptr_int{c} = call i64() @pop()\n") # The pointer is on top of the stack
-                out.write(f"  %a{c} = call i64() @pop()\n")
-                out.write(f"  %ptr_{c} = inttoptr i64 %ptr_int{c} to ptr\n")
-                out.write(f"  store i64 %a{c}, ptr %ptr_{c}\n")
-                c += 1
-            elif word.operand == Intrinsic.LOAD64: # ptr -> int
-                out.write(f"  %ptr_int{c} = call i64() @pop()\n") # -> The pointer
-                out.write(f"  %ptr_{c} = inttoptr i64 %ptr_int{c} to ptr\n")
-                out.write(f"  %c_i64{c} = load i64, ptr %ptr_{c}\n")
-                # out.write(f"  %c_i64{c} = sext i8 %c_i8{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %c_i64{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.ALLOC: # int -> ptr
-                out.write(f"  %size_{c} = call i64() @pop()\n") # -> The pointer
-                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 69)\n")
-                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 %size_{c})\n")
-                out.write(f"  %ptr_{c} = call ptr @malloc(i64 %size_{c})\n")
-                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, i64 420)\n")
-                # out.write(f"  call i64(i8*, ...) @printf(i8* @fmt, ptr %ptr_{c})\n")
-                out.write(f"  %int_{c} = ptrtoint ptr %ptr_{c} to i64\n")
-                out.write(f"  call void(i64) @push(i64 %int_{c})\n")
-                c += 1
-            elif word.operand == Intrinsic.FREE: # ptr ->
-                out.write(f"  %int_{c} = call i64() @pop()\n") # -> The pointer
-                out.write(f"  %ptr_{c} = inttoptr i64 %int_{c} to ptr\n")
-                out.write(f"  call void @free(ptr %ptr_{c})\n")
-                c += 1
-            else:
-                assert False, f"Unknown Intrinsic {word}"
         else:
             assert False, f"Unknown Op Type {word}"
 
@@ -993,9 +815,7 @@ def compile_program_to_ll(program: Program, out_file_path: str):
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         compile_push_pop_functions(out)
-        compile_print_function(out)
-        compile_puts_function(out)
-        compile_alloc_free_functions(out)
+        compile_extern_procs(out, program.extern_procs)
         compile_global_memories(out, program.memories)
         found_main = False
         for proc_name in program.procs:
@@ -1012,6 +832,12 @@ def compile_program_to_ll(program: Program, out_file_path: str):
 
 def compile_ll_to_bin(ll_path: str, bin_path: str):
     print(f"[INFO] Compiling `{ll_path}` to native binary")
+    this_folder = os.path.split(__file__)[0]
+    intrinsics_ll_path = os.path.join(this_folder, "std", "intrinsics.ll")
+    res = run_echoed(["llvm-link", ll_path, intrinsics_ll_path, "-o", ll_path, "-opaque-pointers", "-S"])
+    if res.returncode != 0:
+        print("ERROR: `llvm-link` finished with non-0 exit code")
+        sys.exit(1)
     run_echoed(["llc", ll_path, "-o", bin_path + ".s", "-opaque-pointers"]) # -opaque-pointers argument because newer LLVm versions use [type]* instead of `ptr` type
     res = run_echoed(["clang", bin_path + ".s", "-o", bin_path])
     if res.returncode != 0:
@@ -1054,6 +880,7 @@ def main():
         try:
             print(f"[INFO] Compiling file {src_path}")
             toks = lex_file(src_path)
+            toks = [Token(TT.WORD, "include", src_path, 0, 0), Token(TT.STRING, "intrinsics.collver", src_path, 0, 0)] + toks
         except FileNotFoundError:
             print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
@@ -1061,16 +888,12 @@ def main():
         toks = preprocess_includes(toks, [])
         toks = preprocess_consts(toks)
         toks = preprocess_aliases(toks)
-        words = parse_tokens_into_words(toks)
-        # print('\n'.join([str(word) for word in words]))
-        # print(repr_program(program))
+        words, extern_procs = parse_tokens_into_words(toks)
         program: Program = parse_words_into_program(src_path, words)
+        program.extern_procs = extern_procs
+        print("EP:", extern_procs)
         for proc in program.procs:
             crossreference_proc(program.procs[proc])
-        # for proc in program.procs:
-        #     print(f"proc {proc}")
-        #     print(repr_program(program.procs[proc]))
-        #     print("end")
 
         compile_program_to_ll(program, ll_path)
     if command in ("com", "from-ll"):
