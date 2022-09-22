@@ -9,7 +9,7 @@ import sys
 
 def run_echoed(cmd):
     print(f"[CMD] {' '.join(cmd)}")
-    subprocess.run(cmd)
+    return subprocess.run(cmd)
 
 class TT(Enum):
     INT    = auto()
@@ -339,6 +339,69 @@ def preprocess_consts(tokens: list[Token]) -> list[Token]:
     consts: dict[str, int] = {}
     consts, tokens = extract_consts(tokens)
     tokens = replace_consts(consts, tokens)
+
+    return tokens
+
+def extract_aliases(tokens: list[Token]) -> tuple[dict[str, Token], list[Token]]:
+    rtokens = list(reversed(tokens))
+    aliases: dict[str, Token] = {}
+    new_toks: list[Token] = []
+
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.WORD and tok.value == "alias":
+            if len(rtokens):
+                name_tok = rtokens.pop()
+            else:
+                compiler_error(tok, "Expected name of alias, found EOF")
+                sys.exit(1)
+
+            if name_tok.typ != TT.WORD:
+                compiler_error(name_tok, "Expected token of type `word` for alias name")
+                sys.exit(1)
+
+            if len(rtokens):
+                value_tok = rtokens.pop()
+            else:
+                compiler_error(tok, "Expected value of alias, found EOF")
+                sys.exit(1)
+
+            assert isinstance(name_tok.value, str), "Token of type `word` with non-str type"
+
+            if len(rtokens):
+                end_tok = rtokens.pop()
+            else:
+                compiler_error(value_tok, "Expected `end` keyword to close alias definition, found nothing")
+                sys.exit(1)
+
+            if end_tok.typ ==TT.WORD and end_tok.value == "end":
+                aliases[name_tok.value] = value_tok
+            else:
+                compiler_error(value_tok, "Expected `end` keyword to close alias definition")
+        else:
+            new_toks.append(tok)
+
+    return aliases, new_toks
+
+def replace_aliases(aliases: dict[str, Token], tokens: list[Token]) -> list[Token]:
+    """Replace references to aliases with their values in a list of tokens"""
+    rtokens = list(reversed(tokens))
+    new_tokens = []
+    while len(rtokens):
+        tok = rtokens.pop()
+        if tok.typ == TT.WORD and tok.value in aliases:
+            alias_tok = aliases[tok.value]
+            new_tok = Token(alias_tok.typ, alias_tok.value, tok.file, tok.row, tok.col)
+            new_tokens.append(new_tok)
+        else:
+            new_tokens.append(tok)
+    return new_tokens
+
+def preprocess_aliases(tokens: list[Token]) -> list[Token]:
+    """Given a list of tokens, extract alias definitions and replace alias references"""
+    aliases: dict[str, Token] = {}
+    aliases, tokens = extract_aliases(tokens)
+    tokens = replace_aliases(aliases, tokens)
 
     return tokens
 
@@ -950,7 +1013,10 @@ def compile_program_to_ll(program: Program, out_file_path: str):
 def compile_ll_to_bin(ll_path: str, bin_path: str):
     print(f"[INFO] Compiling `{ll_path}` to native binary")
     run_echoed(["llc", ll_path, "-o", bin_path + ".s", "-opaque-pointers"]) # -opaque-pointers argument because newer LLVm versions use [type]* instead of `ptr` type
-    run_echoed(["clang", bin_path + ".s", "-o", bin_path])
+    res = run_echoed(["clang", bin_path + ".s", "-o", bin_path])
+    if res.returncode != 0:
+        print("ERROR: `clang` finished with non-0 exit code")
+        sys.exit(1)
     print(f"[INFO] Compiled source file to native binary at `{bin_path}`")
 
 def repr_program(program: list[Word]):
@@ -994,6 +1060,7 @@ def main():
 
         toks = preprocess_includes(toks, [])
         toks = preprocess_consts(toks)
+        toks = preprocess_aliases(toks)
         words = parse_tokens_into_words(toks)
         # print('\n'.join([str(word) for word in words]))
         # print(repr_program(program))

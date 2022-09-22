@@ -14,11 +14,8 @@ set iskeyword=a-z,A-Z,-,*,_,!,@
 syntax keyword collverTodos TODO FIXME NOTE
 
 " Language keywords
-syntax keyword collverKeywords proc end
+syntax keyword collverKeywords proc memory const include alias end
 syntax keyword collverControlFlow if elif else while do
-
-" Preprocessor keywords
-syntax keyword collverPreProc memory const include
 
 " Intrinsic words
 syntax keyword collverIntrinsics + - * / % = != > < >= <= << >> dup drop print puts !8 @8 !64 @64 alloc free

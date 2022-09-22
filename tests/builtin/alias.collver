@@ -1,0 +1,9 @@
+proc square // a -> a**2
+  dup *
+end
+
+alias **2 square end
+
+proc main
+  6 **2 print
+end
