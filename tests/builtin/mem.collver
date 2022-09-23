@@ -1,6 +1,6 @@
 include "std.collver"
 
-memory global_bytes 3 end
+memory global_bytes 2 1 + end
 
 proc write_mem
   47 global_bytes     !8

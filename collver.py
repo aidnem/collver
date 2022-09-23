@@ -36,7 +36,7 @@ class OT(Enum):
     INTRINSIC   = auto()
 
 class Keyword(Enum):
-    """Keywords (words that aren't Intrinsics)"""
+    """Keywords (words that affect control flow)"""
     MEMORY = auto()
     PROC   = auto()
     IF     = auto()
@@ -45,32 +45,6 @@ class Keyword(Enum):
     DO     = auto()
     ELSE   = auto()
     END    = auto()
-
-class Intrinsic(Enum):
-    """Intrinsic words"""
-    PLUS    = auto()
-    MINUS   = auto()
-    MULT    = auto()
-    DIV     = auto()
-    MOD     = auto()
-    EQ      = auto()
-    NE      = auto()
-    GT      = auto()
-    LT      = auto()
-    GE      = auto()
-    LE      = auto()
-    SHL     = auto()
-    SHR     = auto()
-    DUP     = auto()
-    DROP    = auto()
-    PRINT   = auto()
-    PUTS    = auto()
-    STORE8  = auto()
-    LOAD8   = auto()
-    STORE64 = auto()
-    LOAD64  = auto()
-    ALLOC   = auto()
-    FREE    = auto()
 
 @dataclass
 class Word:
@@ -178,34 +152,6 @@ STR_TO_KEYWORD: dict[str, Keyword] = {
     "else": Keyword.ELSE,
     "end": Keyword.END,
 }
-
-assert len(Intrinsic) == 23, "Exhaustive map of Intrinsics in STR_TO_INTRINSIC"
-STR_TO_INTRINSIC: dict[str, Intrinsic] = {
-    "+": Intrinsic.PLUS,
-    "-": Intrinsic.MINUS,
-    "*": Intrinsic.MULT,
-    "/": Intrinsic.DIV,
-    "%": Intrinsic.MOD,
-    "=": Intrinsic.EQ,
-    "!=": Intrinsic.NE,
-    ">": Intrinsic.GT,
-    "<": Intrinsic.LT,
-    ">=": Intrinsic.GE,
-    "<=": Intrinsic.LE,
-    "<<": Intrinsic.SHL,
-    ">>": Intrinsic.SHR,
-    "dup": Intrinsic.DUP,
-    "drop": Intrinsic.DROP,
-    "print": Intrinsic.PRINT,
-    "puts": Intrinsic.PUTS,
-    "!8": Intrinsic.STORE8,
-    "@8": Intrinsic.LOAD8,
-    "!64": Intrinsic.STORE64,
-    "@64": Intrinsic.LOAD64,
-    "alloc": Intrinsic.ALLOC,
-    "free": Intrinsic.FREE,
-}
-
 
 def extract_consts(tokens: list[Token]) -> tuple[dict[str, int], list[Token]]:
     """Extract const definitions and return the defined consts and new tokens"""
@@ -488,17 +434,17 @@ def eval_memory_size(rwords: list[Word], name_word: Word) -> int:
         elif body_word.typ == OT.PUSH_INT:
             assert isinstance(body_word.operand, int), "PUSH_INT word with non-int operand"
             body_stack.append(int(body_word.operand))
-        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.PLUS:
+        elif body_word.typ == OT.PROC_CALL and body_word.operand == "intrinsic_plus":
             a = body_stack.pop()
             b = body_stack.pop()
             c = a + b
             body_stack.append(c)
-        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.MINUS:
+        elif body_word.typ == OT.PROC_CALL and body_word.operand == "intrinsic_minus":
             a = body_stack.pop()
             b = body_stack.pop()
             c = b - a
             body_stack.append(c)
-        elif body_word.typ == OT.INTRINSIC and body_word.operand == Intrinsic.MULT:
+        elif body_word.typ == OT.PROC_CALL and body_word.operand == "intrinsic_mult":
             a = body_stack.pop()
             b = body_stack.pop()
             c = a * b
@@ -606,7 +552,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in crossreference_proc()"
-    assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in crossreference_proc()"
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
@@ -732,7 +677,6 @@ def compile_string_literals_inner(out: TextIOWrapper, proc_name: str, strings: d
 def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_memories: dict[str, int]):
     """Write LLVM IR for a procedure to an open()ed file"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in compile_proc_to_ll()"
-    # assert len(Intrinsic) == 23, "Exhaustive handling of Intrincics in compile_proc_to_ll()" TODO: Verify that this assertion isn't necessary
     assert len(Keyword) == 8, "Exhaustive handling of Keywords in compile_proc_to_ll()"
     compile_string_literals_outer(out, proc_name, proc.strings)
     out.write(f"define void @proc_{proc_name}() ")
