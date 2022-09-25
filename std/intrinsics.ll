@@ -170,7 +170,7 @@ define void @proc_intrinsic_load8() {
   %ptr_int = call i64() @pop()
   %ptr_ = inttoptr i64 %ptr_int to ptr
   %c_i8 = load i8, ptr %ptr_
-  %c_i64 = sext i8 %c_i8 to i64
+  %c_i64 = zext i8 %c_i8 to i64
   call void(i64) @push(i64 %c_i64)
   ret void
 }
@@ -205,5 +205,22 @@ define void @proc_intrinsic_free() {
   %int_ = call i64() @pop()
   %ptr_ = inttoptr i64 %int_ to ptr
   call void @free(ptr %ptr_)
+  ret void
+}
+
+declare void @exit(i32 noundef)
+define void @proc_intrinsic_exit() {
+  %ec_i64 = call i64() @pop()
+  %ec_i32 = trunc i64 %ec_i64 to i32
+  call void @exit(i32 noundef %ec_i32) noreturn
+  unreachable
+}
+
+declare ptr @__error()
+define void @proc_intrinsic_check_errno() {
+  %errno_ptr = call ptr @__error()
+  %errno_i32 = load i32, ptr %errno_ptr
+  %errno_i64 = zext i32 %errno_i32 to i64
+  call void @push(i64 %errno_i64)
   ret void
 }

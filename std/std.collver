@@ -27,6 +27,20 @@ end
 
 // MEMORY MANIPULATION
 
+proc salloc // int -> ptr
+  // Works exactly like the `alloc` intrinsic, except that it handles a failure to allocate the memory
+  memory size sizeof(int) end
+  dup size !64 // Leave the size on the stack
+
+  alloc
+
+  dup if 0 = do // Check if the pointer returned is 0 (indicates a failure in the malloc function)
+    "ERROR: Failed to allocate memory.\nAttempted size of allocated memory: " puts size @64 print
+    "Errno: " puts get_errno print
+    1 exit
+  end // Because of the `dup` before the if, the pointer is still on the stack after this if
+end
+
 proc inc64 // ptr ->
   // Given a pointer to an i64, increment the value stored there
   dup

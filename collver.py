@@ -778,7 +778,8 @@ def compile_ll_to_bin(ll_path: str, bin_path: str):
     print(f"[INFO] Compiling `{ll_path}` to native binary")
     this_folder = os.path.split(__file__)[0]
     intrinsics_ll_path = os.path.join(this_folder, "std", "intrinsics.ll")
-    res = run_echoed(["llvm-link", ll_path, intrinsics_ll_path, "-o", ll_path, "-opaque-pointers", "-S"])
+    files_ll_path = os.path.join(this_folder, "std", "files.ll")
+    res = run_echoed(["llvm-link", ll_path, intrinsics_ll_path, files_ll_path, "-o", ll_path, "-opaque-pointers", "-S"])
     if res.returncode != 0:
         print("ERROR: `llvm-link` finished with non-0 exit code")
         sys.exit(1)
@@ -835,7 +836,6 @@ def main():
         words, extern_procs = parse_tokens_into_words(toks)
         program: Program = parse_words_into_program(src_path, words)
         program.extern_procs = extern_procs
-        print("EP:", extern_procs)
         for proc in program.procs:
             crossreference_proc(program.procs[proc])
 

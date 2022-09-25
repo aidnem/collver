@@ -21,3 +21,5 @@ alias !64 intrinsic_store64 end
 alias @64 intrinsic_load64 end
 alias alloc intrinsic_alloc end
 alias free intrinsic_free end
+alias exit intrinsic_exit end
+alias get_errno intrinsic_check_errno end
