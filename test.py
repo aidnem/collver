@@ -84,7 +84,7 @@ def run_echoed(cmd: list[str], print_outs: bool=False):
 def run_spec(spec: TestSpec) -> TestResult:
     res = run_echoed(["python3.10", "collver.py", "to-ll", spec.file_path])
     if res.returncode != 0:
-        return TestResult(spec, res.stdout, False, b"", b"")
+        return TestResult(spec, res.stderr, False, b"", b"")
     ll_path = os.path.splitext(spec.file_path)[0] + ".ll"
     run_echoed(["python3.10", "collver.py", "from-ll", ll_path])
     bin_path = os.path.splitext(spec.file_path)[0]
