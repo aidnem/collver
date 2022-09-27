@@ -115,9 +115,10 @@ proc strconcat // str1 str2 -> str3
   memory dst sizeof(ptr) end
   dup str2 !64 strlen len_str2 !64 // Store the length and pointer to str2 in memory
   dup str1 !64 strlen len_str1 !64 // Store the length and pointer to str1 in memory
-  len_str1 @64 len_str2 @64 + alloc dst !64 // Sum the lengths of the two strings and allocate that many bytes, storing the pointer in dst
+  len_str1 @64 len_str2 @64 + 1 + alloc dst !64 // Sum the lengths of the two strings and allocate that many bytes, storing the pointer in dst (adding 1 to null terminate)
   len_str1 @64 str1 @64 dst @64 memcpy // Copy str1 to the beginning of the new memory (memcpy requires a length so we need len_str1 at the beginning)
   len_str2 @64 str2 @64 dst @64 len_str1 @64 + memcpy // Add the length of str1 to the pointer and copy str2 to there
+  dst @64 len_str1 @64 len_str2 @64 + + 0 swap !8 // Write a `0` at the end, null-terminating the new string
   dst @64 // Return the pointer to the new, concatenated string
 end
 
