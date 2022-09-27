@@ -5,7 +5,12 @@
 //       For example, open accepts its arguments in the order: [<BOTTOM OF STACK> *file_path, flags <TOP OF STACK>].
 //       Keep this in mind when syscalls magically fail, you probably just put the arguments in the wrong order.
 
-// Required flags - at least one of these bits must be present
+// File descriptors
+const FD_STDIN 0 end
+const FD_STDOUT 1 end
+const FD_STDERR 2 end
+
+// open(): Required flags - at least one of these bits must be present
 const O_RDONLY 0 end
 const O_WRONLY 1 end
 const O_RDWR   2 end
@@ -143,4 +148,22 @@ proc fp_to_str // ptr -> ptr
   fd @64 fd_to_str
   fd @64 sys_close drop
   fp_str @64 free
+end
+
+proc fd_readline
+  memory fd sizeof(int) end
+  memory strptr sizeof(ptr) end
+  memory buf sizeof(byte) 2 * end
+  fd !64
+  buf     0 swap !8
+  buf 1 + 0 swap !8
+  "" strcpy strptr !64
+  // strptr cpy(buf)
+  while buf @8 10 != do
+    fd @64 buf 1 sys_read drop
+    strptr @64 buf strcpy strconcat_d strptr !64
+    strptr @64 strlen strptr @64 + 0 swap !8
+  end
+
+  strptr @64
 end
