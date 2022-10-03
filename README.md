@@ -5,9 +5,14 @@ ease-of-implementation.
 
 Collver is a compiled language, and it is stack-based.
 
-In theory, a hello world program in collver could look something like this:
-```py
-"Hello, world!\n" puts
+In theory, a hello world program in collver looks something like this:
+```c
+include "std.collver" // Include the standard library, which defines the `puts` procedure
+
+proc main // The main procedure, like int main() in c
+  "Hello, world!\n" // Initialize a null-terminated string, and push its pointer to the stack
+  puts // Take this pointer, and use it to print the string to stdout
+end
 ```
 
 Unlike other programming languages that focus on silly things like memory
