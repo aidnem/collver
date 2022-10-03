@@ -1,3 +1,5 @@
+include "std.collver"
+
 proc square // a -> a**2
   dup *
 end

@@ -1,3 +1,5 @@
+include "std.collver"
+
 const number
   172
 end

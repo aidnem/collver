@@ -10,7 +10,7 @@ if exists("b:current_syntax")
   finish
 endif
 
-set iskeyword=a-z,A-Z,-,*,_,!,@
+set iskeyword=a-z,A-Z,_,!,@
 syntax keyword collverTodos TODO FIXME NOTE
 
 " Language keywords
@@ -18,7 +18,7 @@ syntax keyword collverKeywords proc memory const include alias end
 syntax keyword collverControlFlow if elif else while do
 
 " Intrinsic words
-syntax keyword collverIntrinsics + - * / % = != > < >= <= << >> dup drop print puts !8 @8 !64 @64 alloc free
+syntax keyword collverIntrinsics + - * / % = != > < >= <= << >> dup drop !8 @8 !64 @64 alloc free
 
 " Comments
 syntax region collverCommentLine start="//" end="$"   contains=collverTodos

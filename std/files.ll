@@ -35,6 +35,18 @@ define void @proc_ll_lseek() {
   ret void
 }
 
+declare i64 @write(i32 noundef, ptr noundef, i64 noundef)
+define void @proc_ll_write() {
+  %count = call i64 @pop()
+  %buf_i64 = call i64 @pop()
+  %buf_ptr = inttoptr i64 %buf_i64 to ptr
+  %fd = call i64 @pop()
+  %fd_i32 = trunc i64 %fd to i32
+  %res = call i64 @write(i32 noundef %fd_i32, ptr noundef %buf_ptr, i64 noundef %count)
+  call void @push(i64 %res)
+  ret void
+}
+
 declare i64 @read(i32 noundef, ptr noundef, i64 noundef)
 define void @proc_ll_read() {
   %count = call i64 @pop()

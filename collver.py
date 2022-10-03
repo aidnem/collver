@@ -390,7 +390,6 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
             if tok.value in STR_TO_KEYWORD:
                 words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[str(tok.value)], tok, None))
             elif tok.value == "here":
-                print(f"Found `here` word: {pretty_loc(tok)}")
                 words.append(Word(OT.PUSH_STR, pretty_loc(tok), tok, None))
             elif len(words) and words[-1].operand == Keyword.PROC:
                 if tok.typ == TT.WORD:

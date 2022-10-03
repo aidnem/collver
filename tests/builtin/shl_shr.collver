@@ -1,4 +1,7 @@
+include "std.collver"
+
 proc main
-  1 6 << dup print
-    1 >> dup print
+  1
+  6 << dup print
+  1 >> dup print
 end

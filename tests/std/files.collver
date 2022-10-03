@@ -1,5 +1,4 @@
 include "std.collver"
-include "files.collver"
 
 proc main
   "./tests/std/file.txt" strcpy fp_to_str puts

@@ -1,0 +1,3 @@
+const sizeof(byte) 1 end
+const sizeof(int) sizeof(byte) 8 * end
+const sizeof(ptr) sizeof(int) end

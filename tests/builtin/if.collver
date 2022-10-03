@@ -1,3 +1,5 @@
+include "std.collver"
+
 proc main
   if 1 do
     1 print

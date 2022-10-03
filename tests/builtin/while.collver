@@ -1,3 +1,5 @@
+include "std.collver"
+
 proc main
   10
   while dup 0 > do
