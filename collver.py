@@ -411,7 +411,7 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
             elif tok.value in mem_names:
                     words.append(Word(OT.PUSH_MEMORY, tok.value, tok, None))
             else:
-                if not str(tok.value).startswith("intrinsic_"):
+                if not (str(tok.value).startswith("intrinsic_") or str(tok.value).startswith("ll_")):
                     compiler_warning(tok, f"Unknown word `{tok.value}`, treating it like an external proc call")
                 words.append(Word(OT.PROC_CALL, tok.value, tok, None))
                 extern_procs.append(str(tok.value))
