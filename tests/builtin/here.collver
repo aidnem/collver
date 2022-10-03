@@ -1,0 +1,3 @@
+proc main
+  here puts ": Here we are!\n" puts
+end

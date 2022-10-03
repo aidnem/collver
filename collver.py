@@ -60,15 +60,15 @@ def pretty_loc(tok: Token) -> str:
 
 def compiler_warning(tok: Token, msg: str) -> None:
     """Print a warning at a location, DOES NOT EXIT AUTOMATICALLY"""
-    print(f"{pretty_loc(tok)}:WARNING: {msg}", file=sys.stderr)
+    print(f"{pretty_loc(tok)}:warning: {msg}", file=sys.stderr)
 
 def compiler_error(tok: Token, msg: str) -> None:
     """Print an error at a location, DOES NOT EXIT AUTOMATICALLY"""
-    print(f"{pretty_loc(tok)}:ERROR: {msg}", file=sys.stderr)
+    print(f"{pretty_loc(tok)}:error: {msg}", file=sys.stderr)
 
 def compiler_note(tok: Token, msg: str) -> None:
     """Print a note at a location, DOES NOT EXIT AUTOMATICALLY"""
-    print(f"{pretty_loc(tok)}:NOTE: {msg}", file=sys.stderr)
+    print(f"{pretty_loc(tok)}:note: {msg}", file=sys.stderr)
 
 def lex_line(line: str) -> list[tuple[int, str]]:
     """Lexes a line, returning a list of pairs (col, str)"""
@@ -270,7 +270,7 @@ def preprocess_includes(tokens: list[Token], included_files: list[str]) -> list[
                         src_path = std_path
                         included_toks = lex_file(src_path)
                     except FileNotFoundError:
-                        compiler_error(file_tok, f"ERROR: Included file `{os.path.basename(src_path)}` not found!")
+                        compiler_error(file_tok, f" Included file `{os.path.basename(src_path)}` not found!")
                         sys.exit(1)
 
                 new_tokens.extend(included_toks)
@@ -389,6 +389,9 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
         elif tok.typ == TT.WORD:
             if tok.value in STR_TO_KEYWORD:
                 words.append(Word(OT.KEYWORD, STR_TO_KEYWORD[str(tok.value)], tok, None))
+            elif tok.value == "here":
+                print(f"Found `here` word: {pretty_loc(tok)}")
+                words.append(Word(OT.PUSH_STR, pretty_loc(tok), tok, None))
             elif len(words) and words[-1].operand == Keyword.PROC:
                 if tok.typ == TT.WORD:
                     words.append(Word(OT.PROC_NAME, tok.value, tok, None))
@@ -781,12 +784,12 @@ def compile_ll_to_bin(ll_path: str, bin_path: str):
     files_ll_path = os.path.join(this_folder, "std", "files.ll")
     res = run_echoed(["llvm-link", ll_path, intrinsics_ll_path, files_ll_path, "-o", ll_path, "-opaque-pointers", "-S"])
     if res.returncode != 0:
-        print("ERROR: `llvm-link` finished with non-0 exit code")
+        print("error: `llvm-link` finished with non-0 exit code")
         sys.exit(1)
     run_echoed(["llc", ll_path, "-o", bin_path + ".s", "-opaque-pointers"]) # -opaque-pointers argument because newer LLVm versions use [type]* instead of `ptr` type
     res = run_echoed(["clang", bin_path + ".s", "-o", bin_path])
     if res.returncode != 0:
-        print("ERROR: `clang` finished with non-0 exit code")
+        print("error: `clang` finished with non-0 exit code")
         sys.exit(1)
     print(f"[INFO] Compiled source file to native binary at `{bin_path}`")
 
@@ -810,13 +813,13 @@ USAGE: [python3.10] collver.py <subcommand> <filename> [flags]
 def main():
     if len(sys.argv) < 3:
         usage()
-        print("ERROR: Not enough arguments provided", file=sys.stderr)
+        print("error: Not enough arguments provided", file=sys.stderr)
         sys.exit(1)
     else:
         command = sys.argv[1]
         if command not in COMMANDS:
             usage()
-            print(f"ERROR: Unknown subcommand {command}", file=sys.stderr)
+            print(f"error: Unknown subcommand {command}", file=sys.stderr)
             sys.exit(1)
         src_path = sys.argv[2]
         exec_path = os.path.splitext(src_path)[0]
@@ -827,7 +830,7 @@ def main():
             toks = lex_file(src_path)
             toks = [Token(TT.WORD, "include", src_path, 0, 0), Token(TT.STRING, "intrinsics.collver", src_path, 0, 0)] + toks
         except FileNotFoundError:
-            print(f"ERROR: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
+            print(f"error: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
             sys.exit(1)
 
         toks = preprocess_includes(toks, [])
