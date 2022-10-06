@@ -344,7 +344,7 @@ proc itos // int -> ptr
     over !8
     num @64 10 / num !64
     1 -
-  end
+  end drop
 
   strptr @64
 end
@@ -361,8 +361,7 @@ end
 
 proc print // int ->
   // Given an int, print it to stdout with a newline
-  itos puts "\n" puts drop
-  // TODO: Find out what ^this mystery value is that we're dropping, puts calls fd_puts which *should* drop the bytes written afterwards
+  itos puts "\n" puts
 end
 
 proc eprint // int ->
