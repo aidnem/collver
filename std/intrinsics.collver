@@ -9,6 +9,9 @@ alias > intrinsic_gt end
 alias < intrinsic_lt end
 alias >= intrinsic_ge end
 alias <= intrinsic_le end
+alias & intrinsic_band end
+alias | intrinsic_bor end
+alias ^ intrinsic_bxor end
 alias << intrinsic_shl end
 alias >> intrinsic_shr end
 alias dup intrinsic_dup end

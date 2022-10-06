@@ -4,4 +4,7 @@ shl_shr.collver
 [!STDOUT]
 64
 32
+255
+0
+5
 [!STDERR]

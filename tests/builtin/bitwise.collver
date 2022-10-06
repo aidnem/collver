@@ -1,0 +1,10 @@
+include "std.collver"
+
+proc main
+  1
+  6 << dup print
+  1 >> dup print drop
+  255 2   | print
+  255 255 ^ print
+  5   7   & print
+end

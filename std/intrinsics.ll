@@ -112,6 +112,30 @@ define void @proc_intrinsic_le() {
   ret void
 }
 
+define void @proc_intrinsic_bor() {
+  %a = call i64() @pop()
+  %b = call i64() @pop()
+  %c = or i64 %b, %a
+  call void(i64) @push(i64 %c)
+  ret void
+}
+
+define void @proc_intrinsic_band() {
+  %a = call i64() @pop()
+  %b = call i64() @pop()
+  %c = and i64 %b, %a
+  call void(i64) @push(i64 %c)
+  ret void
+}
+
+define void @proc_intrinsic_bxor() {
+  %a = call i64() @pop()
+  %b = call i64() @pop()
+  %c = xor i64 %b, %a
+  call void(i64) @push(i64 %c)
+  ret void
+}
+
 define void @proc_intrinsic_shl() {
   %a = call i64() @pop()
   %b = call i64() @pop()
