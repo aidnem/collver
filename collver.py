@@ -510,13 +510,8 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                     mem_name = str(mem_name_word.operand)
 
                     mem_buf[mem_name] = eval_memory_size(rwords, mem_name_word)
-                else:
-                    rwords.append(word)
-                    break
-
-            while len(rwords):
-                word = rwords.pop()
-                if word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
+                    continue
+                elif word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
                     nesting_depth += 1
                 elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
                     if nesting_depth:
