@@ -13,8 +13,7 @@ end
 memory board BOARD_CAP end
 
 proc init_edges
-  // Initialize 1s on either edge of the board
-  1 board 1 + !8
+  // Initialize 1s on the right edge of the board
   1 board BOARD_CAP + 1 - !8
 end
 
@@ -56,11 +55,12 @@ proc update_board
   |
 
   2 while dup BOARD_CAP 1 - < do
-    // Calculate the new patter
+    // Calculate the new pattern
     swap 1 << 7 &
-    2dup over board + @8 |
+    // Here we add 1 to the address that we read from so that the pattern won't be mirrored
+    2dup over board + 1 + @8 |
     // Apply rule 110
-    swap over apply_110 
+    swap over apply_110
     // Write the rule 110-ed number back to memory
     swap board + !8
     // Get rid of the unnecessary data left on stack
