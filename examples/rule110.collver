@@ -1,5 +1,13 @@
 // Rule 110 cellular automaton implemented in Collver
 // https://en.wikipedia.org/wiki/Rule_110
+// Note: This program is capable of simulating any
+// Elementary Cellular Automaton, 110 was chosen because it looks cool.
+// https://en.wikipedia.org/wiki/Elementary_cellular_automaton
+// The rule can be changed by modifying the const `RULE`
+// Here are some more fun rules to try:
+// https://en.wikipedia.org/wiki/Elementary_cellular_automaton#:~:text=Images%20for%20rules%200%2D99%5Bedit%5D
+// Note: this list is not comprehensive, it excludes rules 100-255
+// Rule 99 is my personal favorite!
 
 include "std.collver"
 
@@ -12,38 +20,41 @@ end
 
 memory board BOARD_CAP end
 
-proc init_edges
+proc init_board
   // Initialize 1s on the right edge of the board
-  1 board BOARD_CAP + 1 - !8
+  1 board BOARD_CAP 2 / + !8
 end
 
-// ascii code of the character to be printed in a blank space
-const BLANK_CHAR 32 end
-// ascii code of the character to be printed in a filled space
-const FILLED_CHAR 35 end
-// this const calculates how much the difference is between the ascii codes at compile time
-const PRINT_DIFF FILLED_CHAR BLANK_CHAR - end
+// We have to use aliases because consts cannot be assigned to string literals
+// TODO: Implement string literals as const values
+alias BLANK_STR "  " end
+alias FILLED_STR "▒▒" end
+// Other cool characters:
+// "▒▒"
+// "▓▓"
+// "██"
+// "*"
+// alias BLANK_STR " " end
+// alias FILLED_STR "*" end
 
 proc print_board
-  memory draw_buf BOARD_CAP 1 + end
-
-  draw_buf BOARD_CAP + 1 - 0 swap !8
-  BOARD_CAP board draw_buf memcpy
-
-  // Iterate over the draw buffer, converting 0 and 1 to ' ' and '*'
-  BOARD_CAP 0 while 2dup > do
-    dup draw_buf + dup @8 // Get the character at `n`, leaving (n+draw_buf) on the stack
-    PRINT_DIFF * BLANK_CHAR + // Multiply by PRINT_DIFF, and add BLANK_CHAR. For example: '*' = 42, so if it equals 1, it will be 1*10+32=42, and if 0 it will be 0*10+32=32.
-    swap !8 // Write it back to the correct location
+  0 while dup BOARD_CAP < do
+    // Get the cell from the board at the current position
+    if dup board + @8 do
+      FILLED_STR puts
+    else
+      BLANK_STR puts
+    end
     1 +
-  end drop drop
-  draw_buf puts
+  end drop // Make sure you drop the iterator at the end of the while loop!
   "\n" puts
 end
 
-proc apply_110 // int -> int
+const RULE 110 end
+
+proc apply_rule // int -> int
   // Given an int of 1 byte (0-7), apply rule 110 to it
-  110 swap >> 1 &
+  RULE swap >> 1 &
 end
 
 proc update_board
@@ -60,7 +71,7 @@ proc update_board
     // Here we add 1 to the address that we read from so that the pattern won't be mirrored
     2dup over board + 1 + @8 |
     // Apply rule 110
-    swap over apply_110
+    swap over apply_rule
     // Write the rule 110-ed number back to memory
     swap board + !8
     // Get rid of the unnecessary data left on stack
@@ -74,7 +85,7 @@ proc update_board
 end
 
 proc main
-  init_edges
+  init_board
 
   0 while dup BOARD_HEIGHT < do
     // dup print
