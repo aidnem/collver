@@ -1,0 +1,5 @@
+include "std.collver"
+
+proc main
+  print @64 puts "\n" puts
+end

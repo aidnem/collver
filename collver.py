@@ -655,7 +655,7 @@ def escaped_strlen(val: str) -> int:
                 else:
                     res += 2
         else:
-            res += 1
+            res += len(c.encode())
 
     return res
 
@@ -746,8 +746,12 @@ def compile_proc_to_ll(out: TextIOWrapper, proc_name: str, proc: Proc, global_me
 
 def compile_main_function(out: TextIOWrapper):
     """Write LLVM IR for a main function (the entry point) to an open()ed file"""
-    out.write("define i64 @main() {\n")
+    out.write("define i64 @main(i64 %argc, ptr %argv) {\n")
+    out.write("  %argv_i64 = ptrtoint ptr %argv to i64\n")
+    out.write("  call void(i64) @push(i64 %argv_i64)\n")
+    out.write("  call void(i64) @push(i64 %argc)\n")
     out.write("  call void() @proc_main()\n")
+    out.write("  %returncode = call i64() @pop()\n")
     out.write("  ret i64 0\n")
     out.write("}\n")
 
