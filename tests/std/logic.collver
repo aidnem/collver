@@ -1,0 +1,22 @@
+include "std.collver"
+
+proc bool_println
+  btos puts "\n" puts
+end
+
+proc main
+  0   lnot bool_println
+  1   lnot bool_println
+  0 0 lor  bool_println
+  1 0 lor  bool_println
+  0 1 lor  bool_println
+  1 1 lor  bool_println
+  0 0 land bool_println
+  0 1 land bool_println
+  1 0 land bool_println
+  1 1 land bool_println
+  0 0 lxor bool_println
+  1 0 lxor bool_println
+  0 1 lxor bool_println
+  1 1 lxor bool_println
+end

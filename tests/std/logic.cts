@@ -1,0 +1,15 @@
+[!STDOUT]
+true
+false
+false
+true
+true
+true
+false
+false
+false
+true
+false
+true
+true
+false

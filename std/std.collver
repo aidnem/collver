@@ -22,6 +22,72 @@ proc over // a b -> a b a
   a @64
 end
 
+proc 2dup // a b -> a b a b
+  over over
+end
+
+// LOGICAL OPERATIONS
+proc lnorm // int -> bool
+  // Given an int, normalize it (convert it to a 1 or a zero), (0=false, anything else=true)
+  0 !=
+end
+
+proc lnot
+  // Logical not
+  0 =
+end
+
+proc 2norm
+  // Normalize the top two items on the stack
+  lnorm swap lnorm swap
+end
+
+proc nland
+  // Normalized logical and (only for already normalized numbers, but a little faster)
+  *
+end
+
+proc land
+  // Logical and
+  2norm nland
+end
+alias && land end
+
+proc nlor
+  // Normalized logical or (only for already normalized numbers, but a little faster)
+  + lnorm
+end
+
+proc lor
+  // Logical or
+  2norm nlor
+end
+alias || lor end
+
+proc nlxor
+  // Normalized logical xor (only for already normalized numbers, but a little faster)
+  memory tmp sizeof(byte) end
+  // !(a && b) tmp
+  2dup nlor tmp !8
+  nland lnot
+  tmp @8
+  nland
+end
+
+proc lxor
+  // Logical xor
+  2norm nlxor
+end
+
+proc btos
+  // bool to string
+  if do
+    "true"
+  else
+    "false"
+  end
+end
+
 // MEMORY MANIPULATION
 
 // TODO: Fix puts dependency loop (puts depends on some memory manip procs, salloc depends on puts)
