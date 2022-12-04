@@ -5,7 +5,7 @@ ease-of-implementation.
 
 Collver is a compiled language, and it is stack-based.
 
-In theory, a hello world program in collver looks something like this:
+A hello world program in collver looks like this:
 ```c
 include "std.collver" // Include the standard library, which defines the `puts` procedure
 
@@ -14,6 +14,7 @@ proc main // The main procedure, like int main() in c
   puts // Take this pointer, and use it to print the string to stdout
 end
 ```
+Notice how there are no variables, and the data just lives on the stack.
 
 Unlike other programming languages that focus on silly things like memory
 safety or ease-of-use, Collver is meant to be as simple to implement as
@@ -24,5 +25,5 @@ The reasons for this are as follows:
 1. I'm clueless and have basically no idea how to write a compiler.
 2. If I make the implementation simpler, it will be easier to rewrite in itself.
 
-Collver will (hopefully) eventually be written in itself, but for now the
-compiler is implemented in python.
+Collver will (hopefully) eventually be self-hosted (written in itself), but for
+now the compiler is implemented in python.
