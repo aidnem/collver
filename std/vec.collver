@@ -1,0 +1,325 @@
+// vec.collver
+// Standard Library Implementation of Collver Vectors
+// This is a very basic implementation of Vectors,
+// it could (and should) be optimized very easily.
+
+include "std.collver"
+
+/// VECTOR STRUCT
+
+// struct vec {
+//   int count
+//   int cap
+//   int item_size
+//   void* start
+// }
+
+const vec.count sizeof(int) offset end
+const vec.cap sizeof(int) offset end
+const vec.size sizeof(int) offset end
+const vec.start sizeof(ptr) offset end
+const sizeof(vec) reset end
+
+// Given a pointer, initialize a new, empty vector at that point in memory
+proc vec_init // size_t size, ptr p ->
+  memory size sizeof(int) end
+  memory vec_ptr sizeof(ptr) end
+
+  vec_ptr !ptr // Store the pointer for later steps
+  size !int // Store the size for later steps
+
+  0 // Put a zero (data) on the stack
+  vec_ptr @ptr vec.count + // Get the pointer to the `vec.count` field
+  !int // Write the 0 into the count
+
+  0
+  vec_ptr @ptr vec.cap +
+  !int // Repeat the process for `vec.cap`
+
+  size @int
+  vec_ptr @ptr vec.size +
+  !int // Write the size to the size field.
+
+  0
+  vec_ptr @ptr vec.start +
+  !int // Write a 0 into the start pointer field (null pointer).
+end
+
+// Allocate and initialize a new, empty vector
+proc vec_new // (size_t size) -> ptr
+  memory size sizeof(int) end
+  memory vec_ptr sizeof(ptr) end
+  size !int // Save the size to the `size` variable
+  sizeof(vec) alloc // Allocate the new struct
+  vec_ptr !ptr // Write its pointer to the `vec_ptr` variable
+
+  size @int vec_ptr @ptr vec_init // Initialize the vec struct
+  vec_ptr @ptr
+end
+
+proc vec_read_count // ptr vec -> int count
+  // Read the `count` field from a vector
+  vec.count + @int
+end
+
+alias @vec.count vec_read_count end
+
+proc vec_write_count // int count, ptr vec ->
+  // Write to the `count` field of a vector
+  vec.count + !int
+end
+
+alias !vec.count vec_write_count end
+
+proc vec_read_cap // ptr vec -> int cap
+  // Read the `cap` field from a vector
+  vec.cap + @int
+end
+
+alias @vec.cap vec_read_cap end
+
+proc vec_write_cap // int cap, ptr vec ->
+  // Write to the `cap` field of a vector
+  vec.cap + !int
+end
+
+alias !vec.cap vec_write_cap end
+
+proc vec_read_size // ptr vec -> int size
+  // Read the `size` field from a vector
+  vec.size + @int
+end
+
+alias @vec.size vec_read_size end
+
+proc vec_write_size // int size, ptr vec ->
+  // Write to the `size` field of a vector
+  vec.size + !int
+end
+
+alias !vec.size vec_write_size end
+
+proc vec_read_start // ptr vec -> ptr start
+  // Read the `start` field from a vector
+  vec.start + @ptr
+end
+
+alias @vec.start vec_read_start end
+
+proc vec_write_start // ptr start, ptr vec ->
+  // Write to the `start` field of a vector
+  vec.start + !ptr
+end
+
+alias !vec.start vec_write_start end
+
+// Add the first item to a vector (use vec_push instead)
+proc vec_add_first // ptr item_ptr, ptr vec_ptr ->
+  memory item_ptr sizeof(ptr) end
+  memory vec_ptr sizeof(ptr) end
+  memory start_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+  item_ptr !ptr
+
+  if vec_ptr @ptr @vec.start 0 != do
+    "error: vec_add_first called with non-null `start` pointer\n" puts
+    "  note: `start` pointer was: " puts vec_ptr @ptr @vec.start print
+    "  note: if you weren't expecting this, report the issue on github\n" puts
+    "  aborting :(\n" puts
+    1 exit
+  end
+
+  vec_ptr @ptr @vec.size alloc start_ptr !ptr // Read the size, and allocate that size
+  start_ptr @ptr vec_ptr @ptr !vec.start // Write the new pointer to the `start` field
+  vec_ptr @ptr @vec.size // size
+  item_ptr @ptr // src
+  start_ptr @ptr // dst
+  memcpy // copy the item from its original location to the new location
+
+  1 vec_ptr @ptr !vec.count // Write 1 to the `count` and `cap` fields
+  1 vec_ptr @ptr !vec.cap
+end
+
+// Reallocate a vector so that count < cap (if necessary)
+proc vec_update_cap // ptr vec_ptr 
+  memory vec_ptr sizeof(ptr) end
+  memory new_start_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+
+  // Check if the vector needs to be reallocated
+  while // This is a while loop so that it will continue upsizing until large enough
+    vec_ptr @ptr @vec.cap
+    vec_ptr @ptr @vec.count
+    <= // Check if capacity is less than or equal to the number of items
+  do
+    /// Reallocate vector
+    vec_ptr @ptr @vec.cap 2 * // Get (cap*2)
+    vec_ptr @ptr @vec.size // Get item size
+    * // Multiply item size * new_capacity
+    alloc new_start_ptr !ptr // Allocate new vector storage, and save new ptr
+
+    // Copy items from old to new location
+    // size
+    vec_ptr @ptr @vec.size // Get size of item
+    vec_ptr @ptr @vec.cap * // Get number of items and multiply
+    // src
+    vec_ptr @ptr @vec.start // Get old starting location
+    // dst
+    new_start_ptr @ptr // Get new starting location
+    // Execute the mem copy
+    memcpy // Actually copy the items
+
+    vec_ptr @ptr @vec.start free // Free the old vector storage
+    new_start_ptr @ptr vec_ptr @ptr !vec.start // Store the new vector location
+
+    vec_ptr @ptr @vec.cap 2 * // Get (cap*2)
+    vec_ptr @ptr !vec.cap // Write the new capacity
+  end
+end
+
+// Push (append) an item to a vector (automatically uses vec_add_first if needed)
+proc vec_push // ptr item_ptr, ptr vec_ptr ->
+  memory item_ptr sizeof(ptr) end
+  memory vec_ptr sizeof(ptr) end
+  memory new_start_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+  item_ptr !ptr
+
+  // Check if the vector needs to be initialized
+  if vec_ptr @ptr @vec.cap 0 = do
+    item_ptr @ptr vec_ptr @ptr vec_add_first
+  else
+    /// Check if vec needs to be reallocated
+    vec_ptr @ptr vec_update_cap
+
+    /// Append new item
+    // This will use memcpy
+    vec_ptr @ptr @vec.size // Get the size of the item
+    item_ptr @ptr // Get the source to copy from
+    // Calculate the location of the new item
+    vec_ptr @ptr @vec.count //Read the count
+    vec_ptr @ptr @vec.size // Read the size
+    * // Multiply size*count, resulting in number of bytes to offset
+    vec_ptr @ptr @vec.start // Read the start of the storage
+    + // Add offset + start location, resulting in place to write to
+    memcpy
+
+    vec_ptr @ptr vec.count + inc64 // Increment the count
+  end
+end
+
+// Get the pointer to an element in a vector
+proc vec_elem // int idx, ptr vec_ptr -> ptr item_ptr
+  memory idx sizeof(int) end
+  memory vec_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+  idx !int
+
+  vec_ptr @ptr @vec.size // Get the size of an item
+  idx @int // Get the index we're aiming for
+  * // Multiply (size*index) to get offset of item
+  vec_ptr @ptr @vec.start // Get the start of vector storage
+  + // Add the offset to start of the storage, yielding the item pointer
+end
+
+// Get the pointer to a copy of an element in a vector
+proc vec_elemcpy // int idx, ptr vec_ptr -> ptr cpy_ptr
+  memory idx sizeof(int) end
+  memory vec_ptr sizeof(ptr) end
+
+  memory cpy_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+  idx !int
+
+  vec_ptr @ptr @vec.size alloc cpy_ptr !ptr // Allocate new location for item
+
+  vec_ptr @ptr @vec.size // Size
+  idx @int vec_ptr @ptr vec_elem // Source
+  cpy_ptr @ptr // Destination
+  memcpy
+
+  cpy_ptr @ptr // Return poiner to the copy
+end
+
+// Pop the last item from a vector, returning a pointer to the copied item
+proc vec_pop // ptr vec_ptr -> ptr cpy_ptr
+  // This method will find the top item of a vector,
+  // copy it to a new location in memory (so it doesn't get overwritten)
+  // and then decrement the `count` of the vec
+  memory vec_ptr sizeof(ptr) end
+  memory cpy_ptr sizeof(ptr) end
+
+  vec_ptr !ptr
+
+  vec_ptr @ptr @vec.count 1 - // Get the last item in the vector's index (count-1)
+  vec_ptr @ptr vec_elemcpy cpy_ptr !ptr // Make a copy of the element
+
+  vec_ptr @ptr vec.count + // Get the pointer to the `count` field of the vector
+  dec64 // Decrement the `count` field of the vector
+
+  cpy_ptr @ptr // Return the pointer to the copy
+end
+
+/// VECTOR IO PROCS
+
+// Print out the state of a vector (for debugging purposes)
+proc vec_dbg // ptr vec_ptr ->
+  memory vec_ptr sizeof(ptr) end
+  vec_ptr !ptr // Store the vector pointer into the variable
+
+  "vec.count : " puts vec_ptr @ptr @vec.count print
+  "vec.cap   : " puts vec_ptr @ptr @vec.cap print
+  "vec.size  : " puts vec_ptr @ptr @vec.size print
+  "vec.start : " puts vec_ptr @ptr @vec.start print
+end
+
+// Print out a vector of integers
+proc vec_print_int // ptr vec_ptr ->
+  memory vec_ptr sizeof(ptr) end
+  memory i sizeof(int) end
+  vec_ptr !ptr
+
+  "[" puts
+  0 i !int // Initialize i = 0
+  while i @int vec_ptr @ptr @vec.count < do
+    i @int // Get i
+    vec_ptr @ptr vec_elem // Get vec element ptr
+    @int putn // Print the number out
+    if i @int 1 + vec_ptr @ptr @vec.count < do
+      ", " puts
+    end
+    i inc64
+  end
+  "]\n" puts
+end
+
+// Print out a vector of strings (char*)
+proc vec_print_str
+  memory vec_ptr sizeof(ptr) end
+  memory i sizeof(int) end
+  vec_ptr !ptr
+
+  memory dquote sizeof(byte) end
+  34 dquote !byte // Write 34, the ASCII code for '"', to dquote
+  FD_STDOUT dquote 1 sys_write drop // Print a double quote (there will be \" in the language soon, I promise)
+
+  "[" puts
+  0 i !int // Initialize i = 0
+  while i @int vec_ptr @ptr @vec.count < do
+    FD_STDOUT dquote 1 sys_write drop // Print a double quote (there will be \" in the language soon, I promise)
+    i @int // Get i
+    vec_ptr @ptr vec_elem // Get vec element ptr
+    @ptr puts // Print the string out
+    FD_STDOUT dquote 1 sys_write drop // Print a double quote (there will be \" in the language soon, I promise)
+    if i @int 1 + vec_ptr @ptr @vec.count < do
+      ", " puts
+    end
+    i inc64
+  end
+  "]\n" puts
+end

@@ -139,6 +139,16 @@ proc memcpy // size src dst ->
   end drop
 end
 
+// Given an int (or ptr), store it in RAM and return the pointer
+proc ptrto // int i -> ptr p
+  sizeof(int) alloc swap over !int
+end
+
+// Given a byte, store it in RAM and return the pointer
+proc bptrto
+  sizeof(byte) alloc swap over !byte
+end
+
 // STRING MANIPULATION
 
 proc strlen // ptr -> int

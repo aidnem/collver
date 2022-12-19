@@ -1,0 +1,14 @@
+include "std.collver"
+include "vec.collver"
+
+proc main
+  memory my_vec sizeof(vec) end
+  sizeof(int) my_vec vec_init
+
+  0 while dup 5 < do
+    dup ptrto my_vec vec_push
+    1 +
+  end
+
+  my_vec vec_print_int
+end
