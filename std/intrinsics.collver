@@ -20,8 +20,14 @@ alias drop intrinsic_drop end
 // alias puts intrinsic_puts end
 alias !8 intrinsic_store8 end
 alias @8 intrinsic_load8 end
+alias !byte intrinsic_store8 end
+alias @byte intrinsic_load8 end
 alias !64 intrinsic_store64 end
 alias @64 intrinsic_load64 end
+alias !int intrinsic_store64 end
+alias @int intrinsic_load64 end
+alias !ptr intrinsic_store64 end
+alias @ptr intrinsic_load64 end
 alias alloc intrinsic_alloc end
 alias free intrinsic_free end
 alias exit intrinsic_exit end
