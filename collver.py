@@ -828,7 +828,7 @@ def main():
             toks = lex_file(src_path)
             toks = [Token(TT.WORD, "include", src_path, 0, 0), Token(TT.STRING, "intrinsics.collver", src_path, 0, 0)] + toks
         except FileNotFoundError:
-            print(f"error: File `{os.path.basename(src_path)}` not found!", file=sys.stderr)
+            print(f"error: File `{src_path}` not found!", file=sys.stderr)
             sys.exit(1)
 
         toks = preprocess_includes(toks, [])
