@@ -11,4 +11,19 @@ proc main
   end
 
   my_vec vec_print_int
+
+  memory vec1 sizeof(vec) end
+  sizeof(int) vec1 vec_init
+  memory vec2 sizeof(vec) end
+  sizeof(int) vec2 vec_init
+
+  1 ptrto vec1 vec_push
+  2 ptrto vec1 vec_push
+  3 ptrto vec1 vec_push
+  4 ptrto vec2 vec_push
+  5 ptrto vec2 vec_push
+  6 ptrto vec2 vec_push
+  vec1 vec2 vec_extend
+
+  vec1 vec_print_int
 end

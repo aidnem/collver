@@ -265,6 +265,24 @@ proc vec_pop // ptr vec_ptr -> ptr cpy_ptr
   cpy_ptr @ptr // Return the pointer to the copy
 end
 
+// Extend a vector with another vector
+proc vec_extend // ptr vec1, ptr vec2 ->
+  // This method will update `vec1` without modifying `vec2`
+  memory vec1 sizeof(ptr) end
+  memory vec2 sizeof(ptr) end
+  vec2 !ptr
+  vec1 !ptr
+
+  vec1 @ptr @vec.count vec2 @ptr @vec.count + // Get the new count
+  vec1 @ptr !vec.count // Write the new count to vec1
+  vec1 @ptr vec_update_cap // Reallocate vec1 if needed
+
+  vec2 @ptr @vec.size vec2 @ptr @vec.count * // Get number of bytes to copy (size * count of vec2)
+  vec2 @ptr @vec.start // Get start of vec2's storage
+  vec1 @ptr @vec.start vec2 @ptr @vec.size vec2 @ptr @vec.count * + // Destination
+  memcpy
+end
+
 /// VECTOR IO PROCS
 
 // Print out the state of a vector (for debugging purposes)
