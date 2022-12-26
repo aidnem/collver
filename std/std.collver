@@ -209,6 +209,35 @@ proc strconcat_d // str1 str2 -> str3
   str2 @64 free
 end
 
+proc streq // str1 str2 -> bool
+  // Given two strings, check if they are equal
+  memory eq sizeof(byte) end
+  1 eq !byte // Start by assuming they're equal
+
+  memory str1 sizeof(ptr) end
+  memory str2 sizeof(ptr) end
+  str2 !ptr
+  str1 !ptr
+
+  if str1 @ptr strlen str2 @ptr strlen = do // Check if lengths are equal
+    0 while dup str1 @ptr strlen < do
+      // i *(str2+i) *(str1+i)
+      if
+        dup str1 @ptr +
+        over str2 @ptr +
+        @byte swap @byte
+        !=
+      do
+        0 eq !byte
+      end
+      1 +
+    end
+    eq @byte
+  else
+    0 // If lengths aren't equal, return false
+  end
+end
+
 // SYSCALLS
 
 // While these procedures may seem useless, they are here to wrap the functions and include some documentation so that the developer is not completely confused.
@@ -343,6 +372,22 @@ proc sys_write // int ptr int -> int
 
   ll_write
 end
+
+// int system(ptr command)
+proc sys_system // ptr -> int
+  // Uses the `fork` syscall to create a child process that executes the shell
+  // command specified in `command`
+  // Arguments:
+  //  - Command - A pointer to the start of the string containing the shell command to run
+  // Return value:
+  //  - `command` is null : `0` if no shell is available, otherwise a nonzero value
+  //  - Child process couldn't be created : `-1`, `errno` is set
+  //  - Shell couldn't be executed in child process: Return value as if child shell terminated with status 127
+  //  - Success : Return value is the termination status of the child shell that executed `command`, which is the exit status of `command`
+
+  ll_system
+end
+
 
 // BASIC IO
 
@@ -480,4 +525,3 @@ proc fp_to_str // ptr -> ptr
   fd @64 sys_close drop
   fp_str @64 free
 end
-

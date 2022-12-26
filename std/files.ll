@@ -58,3 +58,12 @@ define void @proc_ll_read() {
   call void @push(i64 %res)
   ret void
 }
+
+declare signext i64 @system(ptr noundef)
+define void @proc_ll_system() {
+  %command_i64 = call i64 @pop()
+  %command = inttoptr i64 %command_i64 to ptr
+  %rc = call signext i64 @system(ptr noundef %command)
+  call void @push(i64 %rc)
+  ret void
+}
