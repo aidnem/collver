@@ -614,7 +614,7 @@ def crossreference_proc(proc: Proc) -> None:
                 elif start_word.operand == Keyword.WHILE:
                     word.jmp = start_ip
                 else:
-                    compiler_error(word.tok, "Word `end` can only close `(el)if ... do` block")
+                    compiler_error(word.tok, "Word `end` can only close `(el)if ... do` or `while ... do` blocks")
                     sys.exit(1)
 
                 proc.words[do_ip].jmp = ip
