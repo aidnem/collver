@@ -283,6 +283,27 @@ proc vec_extend // ptr vec1, ptr vec2 ->
   memcpy
 end
 
+// Free a vector's storage space
+proc vec_free
+  memory vec sizeof(ptr) end
+  vec !ptr
+
+  if vec @ptr @vec.start 0 != do // Make sure the start is not a null pointer
+    vec @ptr @vec.start free // Free the memory
+    0 vec @ptr !vec.start // Change the vector's start pointer to be `0` (a null pointer)
+    // The line above prevents you from accidentally freeing your vector twice and your program crashing
+  end
+end
+
+// Free a vector in dynamic memory (free the vector's storage, and then free the struct itself)
+proc vec_free_dynamic
+  memory vec sizeof(ptr) end
+  vec !ptr
+
+  vec @ptr vec_free // Free the vector's storage
+  vec @ptr free // Free the space occupied by the vector itself
+end
+
 /// VECTOR IO PROCS
 
 // Print out the state of a vector (for debugging purposes)
@@ -324,7 +345,7 @@ proc vec_print_str
 
   memory dquote sizeof(byte) end
   34 dquote !byte // Write 34, the ASCII code for '"', to dquote
-  FD_STDOUT dquote 1 sys_write drop // Print a double quote (there will be \" in the language soon, I promise)
+  // FD_STDOUT dquote 1 sys_write drop // Print a double quote (there will be \" in the language soon, I promise)
 
   "[" puts
   0 i !int // Initialize i = 0
