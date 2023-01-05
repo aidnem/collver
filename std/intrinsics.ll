@@ -157,27 +157,10 @@ define void @proc_intrinsic_drop() {
   ret void
 }
 
-declare i64 @printf(i8*, ...)
-@fmt = unnamed_addr constant [4 x i8] c"%i\0A\00"
-define void @proc_intrinsic_print() {
-  %fmtptr = getelementptr [4 x i8], [4 x i8]* @fmt, i64 0, i64 0
-  %a = call i64() @pop()
-  call i64(i8*, ...) @printf(i8* %fmtptr, i64 %a)
-  ret void
-}
-
 define void @proc_intrinsic_dup() {
   %a = call i64() @pop()
   call void(i64) @push(i64 %a)
   call void(i64) @push(i64 %a)
-  ret void
-}
-
-@intrinsic_puts_fmt = private unnamed_addr constant [3 x i8] c"%s\00"
-define void @proc_intrinsic_puts() {
-  %str_int = call i64() @pop()
-  %str_ptr = inttoptr i64 %str_int to ptr
-  call i64(i8*, ...) @printf(i8* @intrinsic_puts_fmt, ptr %str_ptr)
   ret void
 }
 

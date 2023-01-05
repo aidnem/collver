@@ -16,8 +16,6 @@ alias << intrinsic_shl end
 alias >> intrinsic_shr end
 alias dup intrinsic_dup end
 alias drop intrinsic_drop end
-// alias print intrinsic_print end
-// alias puts intrinsic_puts end
 alias !8 intrinsic_store8 end
 alias @8 intrinsic_load8 end
 alias !byte intrinsic_store8 end
