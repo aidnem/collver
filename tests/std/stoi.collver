@@ -1,0 +1,9 @@
+include "std.collver"
+
+proc main
+  "1" stoi print
+  "12" stoi print
+  "32" stoi print
+  "10000" stoi print
+  "987654321" stoi print
+end

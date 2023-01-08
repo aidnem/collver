@@ -470,6 +470,25 @@ proc itos // int -> ptr
   strptr @64
 end
 
+proc stoi // ptr -> int
+  // Given a str (pointer to the start), convert it to an int
+  memory strptr sizeof(ptr) end
+  memory value sizeof(int) end
+  strptr !ptr // Save the string pointer
+  0 value !int // Initialize value to 0
+
+  0 while dup strptr @ptr strlen < do
+    dup strptr @ptr + @byte // Get position `i` of the string
+    48 - // Subtract 48 (ascii number for character '0')
+    value @int 10 * // Multiply value by 10 (shift left, but in base 10)
+    + // Add the value to the new character
+    value !int // Store the new value in `value`
+    1 +
+  end drop
+
+  value @int
+end
+
 proc putn // int ->
   // Given an int, print it to stdout
   itos puts
