@@ -1,0 +1,425 @@
+include "std.collver"
+include "vec.collver"
+
+proc run_echoed // cmd -> returncode
+  "[CMD] " puts
+  dup puts
+  "\n" puts
+  sys_system
+end
+
+// enum TT
+const TT_INT 1 offset end
+const TT_STRING 1 offset end
+const TT_WORD 1 offset end
+const TT_COUNT reset end
+
+// struct token {
+//   type : TT (int)
+//   value : str | int (8 byte slot)
+//   file : str (ptr)
+//   row  : int
+//   col  : int
+// }
+
+const token.type sizeof(int) offset end
+const token.value 8 offset end
+const token.file sizeof(ptr) offset end
+const token.row sizeof(int) offset end
+const token.col sizeof(int) offset end
+const sizeof(token) reset end
+
+proc token_write_type // int ptr ->
+  token.type + !int
+end
+alias !token.type token_write_type end
+
+proc token_read_type // ptr -> int
+  token.type + @int
+end
+alias @token.type token_read_type end
+
+proc token_write_value // int ptr ->
+  token.value + !int
+end
+alias !token.value token_write_value end
+
+proc token_read_value // ptr -> int|ptr
+  token.value + @int
+end
+alias @token.value token_read_value end
+
+proc token_write_file // ptr ptr ->
+  token.file + !ptr
+end
+alias !token.file token_write_file end
+
+proc token_read_file // ptr -> ptr
+  token.file + @ptr
+end
+alias @token.file token_read_file end
+
+proc token_write_row // int ptr ->
+  token.row + !int
+end
+alias !token.row token_write_row end
+
+proc token_read_row // ptr -> int
+  token.row + @int
+end
+alias @token.row token_read_row end
+
+proc token_write_col // int ptr ->
+  token.col + !int
+end
+alias !token.col token_write_col end
+
+proc token_read_col // ptr -> int
+  token.col + @int
+end
+alias @token.col token_read_col end
+
+proc token_init // ptr ->
+  // Given a pointer to a token-sized piece of memory, initialize it with all 0s
+  memory token_ptr sizeof(ptr) end
+  token_ptr !ptr
+  0 token_ptr @ptr !token.type
+  0 token_ptr @ptr !token.value
+  0 token_ptr @ptr !token.file
+  0 token_ptr @ptr !token.row
+  0 token_ptr @ptr !token.col
+end
+
+proc token_dbg // ptr ->
+  // Print all fields of a Token (for debugging)
+  memory token_ptr sizeof(ptr) end
+  token_ptr !ptr
+
+  "Type: " puts token_ptr @ptr @token.type print
+  "Value: " puts token_ptr @ptr @token.value print
+  "File: " puts token_ptr @ptr @token.file print
+  "Row: " puts token_ptr @ptr @token.row print
+  "Col: " puts token_ptr @ptr @token.col print
+end
+
+proc token_print // ptr ->
+  // Pretty-print a token
+  memory token sizeof(token) end
+  sizeof(token) swap token memcpy
+  if token @token.type TT_INT = do
+    "<[I] " puts
+    token @token.value itos dup puts free
+    ">" puts
+  elif token @token.type TT_STRING = do
+    "<[S] '" puts
+    token @token.value puts
+    "'>" puts
+  elif token @token.type TT_WORD = do
+    "<[W] " puts
+    token @token.value puts
+    ">" puts
+  end
+end
+
+proc token_print_vec // ptr ->
+  // Pretty-print a vector of tokens
+  dup vec_dbg
+  memory vec_ptr sizeof(ptr) end
+  vec_ptr !ptr
+  "[" puts
+  0 while dup vec_ptr @ptr @vec.count < do
+    dup vec_ptr @ptr vec_elem token_print
+    " " puts
+    1 +
+  end
+  "]\n" puts
+end
+
+proc lex_file // ptr src_path, ptr tok_vec ->
+  // Given a source file (string) and a vector to add tokens to, lex a file!
+  memory src_path sizeof(ptr) end
+  memory tok_vec sizeof(ptr) end
+
+  tok_vec !ptr
+  src_path !ptr
+
+  // assert that the number of token types is equal to 3, otherewise we need to update the code!
+  if TT_COUNT 3 != do
+    here eputs "COMPILER ERROR: Non-exhaustive handling of enum TT (expected 3 variants)\n" eputs
+    1 exit
+  end
+
+
+  // Initialize the token vector
+  sizeof(token) tok_vec @ptr vec_init
+
+  /// Add tokens for a word `include` and a string `"intrinsics.collver"` to automatically include intrinsics
+  // Construct the `include` word
+  sizeof(token) alloc dup token_init // Initialize a new token
+  dup TT_WORD swap !token.type // type = TT_WORD
+  dup "include" swap !token.value // value = "include"
+  dup src_path @ptr swap !token.file // file = src_path
+  dup 0 swap !token.row // row and col = 0
+  dup 0 swap !token.col
+  dup tok_vec @ptr vec_push // push it to the vector
+  free // free the original token struct
+
+  // Construct the `"intrinsics.collver"` word
+  sizeof(token) alloc dup token_init // Initialize a new token
+  dup TT_STRING swap !token.type // type = TT_STRING
+  dup "intrinsics.collver" swap !token.value // value = "intrinsics.collver"
+  dup src_path @ptr swap !token.file // file = src_path
+  dup 0 swap !token.row // row and col = 0
+  dup 0 swap !token.col
+  dup tok_vec @ptr vec_push // push it to the vector
+  free // free the original token struct
+
+  memory line sizeof(int) end
+  0 line !int // we start on line 0
+
+  memory fd sizeof(int) end
+
+  src_path @ptr O_RDONLY sys_open fd !byte // Open the file, saving the file descriptor
+  if fd @byte 255 = do // Returns 255 if it's an error
+    "error: File `" eputs
+    src_path @ptr eputs
+    "` not found!\n" eputs
+    1 exit
+  end
+
+  memory bufptr sizeof(ptr) end // Pointer to the start of buffer
+  memory bufsz sizeof(int) end // Number of bytes in buffer (including final, null-termination byte)
+
+  fd @byte 0 SEEK_SET sys_lseek drop // Go to the beginning of the file
+  fd @byte fdsize 1 + bufsz !int // Get the size of the file (and add 1, to null-terminate)
+  bufsz @int alloc bufptr !ptr // Allocate a buffer to read the file into
+
+  fd @byte bufptr @ptr bufsz @int sys_read // Attempt to read the whole file into the buffer
+  bufsz @int swap - // Get the number of bytes left to read (in case we didn't read whole file): (bufsz-read_bytes)
+  2 - // Subtract one, since bufsz includes the 1 byte at the end to null-terminate
+
+  // TODO: Handle if the entire file is not read!
+  // while dup do // While we have more bytes to read
+  //   // dup print
+  //   // i i (bufptr + ((bufsz-1) - i)) <-- The line below results in this equation, which is the new location to write to
+  //   // This position is the start of the buffer offset by the size of the buffer, minus the amount of bytes left, minus 1
+  //   // We need to subtract one at the end because bufsz includes the null-termination byte
+  //   // Remaining
+  //   dup dup bufptr over bufsz @int 1 - swap - +
+  //   @ptr swap sys_read // Attempt to read the remaining number of bytes, returning how many were read
+  //   - // Subtract the number of bytes read from the bytes left to read, resulting in how many bytes are left to read
+  // end drop
+  0 bufptr @ptr bufsz @int + !byte // Write a 0 to the end of the buffer (null terminate)
+
+  if fd @byte sys_close do // Close the file, and if the return code is not 0, it's an error
+    "error: Failed to close source file\n" eputs
+    1 exit
+  end
+
+  memory line_vec sizeof(vec) end // Vector to hold each line of the file
+  sizeof(ptr) line_vec vec_init // Initialize this vector to hold pointers to each line string
+
+  memory lexbufptr sizeof(ptr) end
+  memory lexbufsz sizeof(int) end
+
+  bufsz @int alloc lexbufptr !ptr // Initialize a new buffer for the lexer to use
+  0 lexbufsz !int
+
+  // Split the file by each newline
+  0 while dup bufsz @int 1 - < do
+    dup bufptr @ptr + // Get the file buffer, offset by the iterator
+    @byte // Read that byte
+    if dup 10 = do // Check if the character is a newline
+      drop
+      0 lexbufptr @ptr lexbufsz @int + !byte // Null-terminate the lex buffer
+      lexbufptr @ptr strcpy ptrto line_vec vec_push // Add that line to the vector of lines
+      0 lexbufsz !int // Reset the lex buffer size to 0
+    else
+      lexbufptr @ptr lexbufsz @int + // Get the pointer to the position in the lexer buffer
+      !byte // Write the byte from the file buffer to the lex buffer
+      lexbufsz inc64 // Increment the lex buffer size
+    end
+    1 +
+  end
+
+  if lexbufsz @int 0 != do // Check if there is still something in the lex buffer
+    0 lexbufptr @ptr lexbufsz @int + !byte // Null-terminate the lex buffer
+    "'" puts lexbufptr @ptr puts "'\n" puts // Print out the line
+    lexbufptr @ptr strcpy ptrto line_vec vec_push // Add that line to the vector of lines
+    0 lexbufsz !int // Reset lex buffer size to 0
+  end
+
+  memory line_pos sizeof(int) end // Current line
+  memory line_ptr sizeof(ptr) end // Pointer to current line as string
+  memory line_len sizeof(int) end
+  memory col_pos sizeof(int) end
+  memory word_ptr sizeof(ptr) end
+
+  memory is_int sizeof(byte) end // Bool, whether or not the number is still an int
+
+  0 line_pos !int
+  0 col_pos !int
+
+  0 lexbufsz !int
+
+  while line_pos @int line_vec @vec.count < do
+    line_pos @int line_vec vec_elem @ptr line_ptr !ptr
+    line_ptr @ptr strlen line_len !int
+
+    while col_pos @int line_len @int < do
+      col_pos @int line_ptr @ptr + // Get pointer to the current byte
+      @byte // Read that byte
+
+      if dup 32 = do // Check if the character is a space
+        drop
+        0 lexbufptr @ptr lexbufsz @int + !byte // Null-terminate the lex buffer
+        lexbufptr @ptr strcpy word_ptr !ptr // Save the pointer to the word_ptr variable
+
+        sizeof(token) alloc dup token_init // Initialize a new token
+        dup
+        if is_int @byte do
+          TT_INT
+        else
+          TT_WORD
+        end
+        swap !token.type // type = is_int ? TT_INT: TT_WORD
+        dup
+        if is_int @byte do
+          word_ptr @ptr stoi // Convert it to an int
+        else
+          word_ptr @ptr // Keep it as a string
+        end
+        swap !token.value // value = [word string]
+        dup src_path @ptr swap !token.file // file = src_path
+        dup line_pos @int swap !token.row // (row, col) = (line_pos, col_pos)
+        dup col_pos  @int swap !token.col
+        dup tok_vec  @ptr vec_push // push it to the vector
+        dup token_print " " puts
+        free // free the original token struct
+
+        0 lexbufsz !int // Reset the lex buffer size to 0
+
+        1 is_int !byte // Assume that a number is an int, until we encounter a non-number character
+      else
+        // num
+        if dup dup 48 < swap 57 > lor do // Check if number is <48 or >57
+          // (characters 0-9 range ascii 48-57)
+          0 is_int !byte
+        end
+        lexbufptr @ptr lexbufsz @int + // Get the pointer to the position in the lexer buffer
+        !byte // Write the byte from the file buffer to the lex buffer
+        lexbufsz inc64 // Increment the lex buffer size
+      end
+      col_pos inc64
+    end
+
+    if lexbufsz @int 0 != do // Check if there is still something in the lex buffer
+      0 lexbufptr @ptr lexbufsz @int + !byte // Null-terminate the lex buffer
+      lexbufptr @ptr strcpy word_ptr !ptr // Save the pointer to the word_ptr variable
+
+      sizeof(token) alloc dup token_init // Initialize a new token
+      dup TT_WORD  swap !token.type // type = TT_WORD
+      dup word_ptr @ptr swap !token.value // value = [word string]
+      dup src_path @ptr swap !token.file // file = src_path
+      dup line_pos @int swap !token.row // (row, col) = (line_pos, col_pos)
+      dup col_pos  @int swap !token.col
+      dup tok_vec  @ptr vec_push // push it to the vector
+      dup token_print "\n" puts
+      free // free the original token struct
+
+      0 lexbufsz !int // Reset the lex buffer size to 0
+    end
+
+    0 col_pos !int
+    line_pos inc64
+  end
+
+  line_vec vec_print_str
+  tok_vec @ptr token_print_vec
+  line_vec vec_free
+  tok_vec @ptr vec_free
+  bufptr @ptr free
+end
+
+proc remove_ext // ptr -> ptr
+  // Given a pointer to a path string, return a new string without any extension (`folder/file.ext` -> `folder/file`)
+  memory og sizeof(ptr) end // Original path pointer
+  memory sz sizeof(int) end // Size of new path
+  memory dt sizeof(ptr) end // New path pointer
+  og !64
+  0 sz !64
+  0 while dup og @64 + @8 do // Find the location of the last `.` in the path
+    if dup og @64 + @8 46 = do
+      dup sz !64
+    end
+    1 +
+  end
+  sz @64 1 + alloc dt !64
+  sz @64 og @64 dt @64 memcpy
+
+  0 dt @64 sz @64 + !8
+  dt @64
+end
+
+proc print_usage
+  "USAGE: ./collver <subcommand> <filename> [flags]\n" puts
+  "    Subcommands:\n" puts
+  "        com: Compile a source (.collver) file to a binary executable (using clang)\n" puts
+  "        to-ll: Compile a source (.collver) file to llvm assembly/IR (without calling clang)\n" puts
+  "        from-ll: Compile an llvm IR (.ll) file to a binary executable (using clang)\n" puts
+  "    Flags:\n" puts
+  "        -r: Automatically run executable after compiling (only applicable for `com` command)\n" puts
+end
+
+proc valid_subcommand // ptr -> bool
+  if dup "com" streq do
+    1
+  elif dup "to-ll" streq do
+    1
+  elif dup "from-ll" streq do
+    1
+  else
+    0
+  end
+end
+
+proc main
+  memory argc sizeof(int) end
+  memory argv sizeof(ptr) end
+
+  argc !int argv !ptr
+  if argc @int 3 < do
+    print_usage
+    "error: Not enough arguments provided\n" eputs
+    1 exit
+  end
+
+  memory subcommand sizeof(ptr) end
+  argv @ptr sizeof(ptr) + @ptr // Get the command (second argument)
+  strcpy // Copy it (we don't want to tamper with argv)
+  subcommand !ptr // Store that to `subcommand`
+  if subcommand @ptr valid_subcommand lnot do
+    print_usage
+    "error: Unknown subcommand " eputs
+    subcommand @ptr eputs "\n" eputs
+    1 exit
+  end
+
+  memory src_path sizeof(ptr) end
+  memory exec_path sizeof(ptr) end
+  memory ll_path sizeof(ptr) end
+  argv @ptr sizeof(ptr) 2 * + @ptr // Get the source path (third argument)
+  strcpy // Copy it
+  src_path !ptr // Store it in `src_path`
+
+  src_path @ptr remove_ext exec_path !ptr // Remove extension to get output path
+  exec_path @ptr ".ll" strconcat ll_path !ptr // Add ".ll" extension to get LLVM IR file path
+
+  memory toks sizeof(vec) end // Vector of tokens
+  if subcommand @ptr "from-ll" streq lnot do
+    "[INFO] Compiling file " puts src_path @ptr puts "\n" puts
+    src_path @ptr toks lex_file // Pass src_path and pointer to the token vector to `lex_file` proc
+  end
+
+  here puts ": TODO: Implement collver\n" puts 1 exit
+end
