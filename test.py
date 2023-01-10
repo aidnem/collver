@@ -70,8 +70,9 @@ def parse_spec(spec_path: str) -> TestSpec:
 def print_cmd(cmd: list[str]):
     print(f"<CMD> {' '.join(cmd)}")
 
-def run_echoed(cmd: list[str], print_outs: bool=False):
-    print_cmd(cmd)
+def run_echoed(cmd: list[str], print_outs: bool=False, quiet=False):
+    if not quiet:
+        print_cmd(cmd)
     run_res = subprocess.run(cmd, capture_output=True)
     if print_outs:
         out = run_res.stdout.decode("utf-8")
@@ -81,14 +82,15 @@ def run_echoed(cmd: list[str], print_outs: bool=False):
 
     return run_res
 
-def run_spec(spec: TestSpec) -> TestResult:
-    res = run_echoed(["python3.10", "collver.py", "to-ll", spec.file_path])
+def run_spec(spec: TestSpec, quiet=False) -> TestResult:
+    res = run_echoed(["python3.10", "collver.py", "to-ll", spec.file_path], quiet=quiet)
     if res.returncode != 0:
         return TestResult(spec, res.stderr, False, b"", b"")
     ll_path = os.path.splitext(spec.file_path)[0] + ".ll"
-    run_echoed(["python3.10", "collver.py", "from-ll", ll_path])
+    run_echoed(["python3.10", "collver.py", "from-ll", ll_path], quiet=quiet)
     bin_path = os.path.splitext(spec.file_path)[0]
-    print_cmd([bin_path])
+    if not quiet:
+        print_cmd([bin_path])
     run_res = subprocess.run([bin_path], input=spec.provided_input, capture_output=True)
     return TestResult(spec, res.stderr, True, run_res.stdout, run_res.stderr)
 
@@ -156,9 +158,9 @@ def test_output(res: TestResult) -> list[Problem]:
 
     return probs
 
-def test_specfile(fp: str) -> list[Problem]:
+def test_specfile(fp: str, quiet=False) -> list[Problem]:
     spec = parse_spec(fp)
-    res = run_spec(spec)
+    res = run_spec(spec, quiet=quiet)
     probs = test_output(res)
     return probs
 
@@ -206,7 +208,8 @@ def main():
             probs = []
             for spec in specs:
                 print(f"<INFO> Testing spec `{spec}`")
-                probs.extend(test_specfile(spec))
+                quiet = "-quiet" in sys.argv
+                probs.extend(test_specfile(spec, quiet=quiet))
                 if "-clean" in sys.argv:
                     clean_spec(spec, quiet=True)
 
