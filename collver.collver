@@ -256,11 +256,15 @@ proc lex_file // ptr src_path, ptr tok_vec ->
   memory word_ptr sizeof(ptr) end
 
   memory is_int sizeof(byte) end // Bool, whether or not the number is still an int
+  memory is_string sizeof(byte) end // Bool, whether or not the word is a string
 
   0 line_pos !int
   0 col_pos !int
 
   0 lexbufsz !int
+
+  1 is_int !byte // Assume that a word is an int until we find a non-number character
+  0 is_string !byte // Assume that a word is not a string
 
   while line_pos @int line_vec @vec.count < do
     line_pos @int line_vec vec_elem @ptr line_ptr !ptr
@@ -270,7 +274,15 @@ proc lex_file // ptr src_path, ptr tok_vec ->
       col_pos @int line_ptr @ptr + // Get pointer to the current byte
       @byte // Read that byte
 
-      if dup 32 = do // Check if the character is a space
+      // Check if we are:
+      //  - not in a string, and the character is a space
+      //  - in a string, and the character is a double quote
+      // (!is_string && character == 32) || (is_string && character == '"')
+      if
+        dup  32 = is_string @byte lnot land // Check (!is_string && character == 32) 32 == ' '
+        over 34 = is_string @byte      land // Check (is_string && character == 34) 32 == '"'
+        lor // `or` the two together
+      do // Check if the character is a space
         drop
         0 lexbufptr @ptr lexbufsz @int + !byte // Null-terminate the lex buffer
         lexbufptr @ptr strcpy word_ptr !ptr // Save the pointer to the word_ptr variable
@@ -279,6 +291,8 @@ proc lex_file // ptr src_path, ptr tok_vec ->
         dup
         if is_int @byte do
           TT_INT
+        elif is_string @byte do
+          TT_STRING
         else
           TT_WORD
         end
@@ -300,15 +314,25 @@ proc lex_file // ptr src_path, ptr tok_vec ->
         0 lexbufsz !int // Reset the lex buffer size to 0
 
         1 is_int !byte // Assume that a number is an int, until we encounter a non-number character
+        0 is_string !byte // Assume that it is not a string, until we find a double quote at the beginning
       else
         // num
         if dup dup 48 < swap 57 > lor do // Check if number is <48 or >57
           // (characters 0-9 range ascii 48-57)
           0 is_int !byte
         end
-        lexbufptr @ptr lexbufsz @int + // Get the pointer to the position in the lexer buffer
-        !byte // Write the byte from the file buffer to the lex buffer
-        lexbufsz inc64 // Increment the lex buffer size
+        if
+          dup 34 = // Check if character is a double quote
+          lexbufsz @int 0 = // Check if the lex buffer has no characters in it
+          land // Logical and
+        do
+          drop
+          1 is_string !byte
+        else
+          lexbufptr @ptr lexbufsz @int + // Get the pointer to the position in the lexer buffer
+          !byte // Write the byte from the file buffer to the lex buffer
+          lexbufsz inc64 // Increment the lex buffer size
+        end
       end
       col_pos inc64
     end
@@ -318,8 +342,22 @@ proc lex_file // ptr src_path, ptr tok_vec ->
       lexbufptr @ptr strcpy word_ptr !ptr // Save the pointer to the word_ptr variable
 
       sizeof(token) alloc dup token_init // Initialize a new token
-      dup TT_WORD  swap !token.type // type = TT_WORD
-      dup word_ptr @ptr swap !token.value // value = [word string]
+      dup
+      if is_int @byte do
+        TT_INT
+      elif is_string @byte do
+        TT_STRING
+      else
+        TT_WORD
+      end
+      swap !token.type // type = token_type
+      dup
+      if is_int @byte do
+        word_ptr @ptr stoi // Convert it to an int
+      else
+        word_ptr @ptr // Keep it as a string
+      end
+      swap !token.value // value = [word string]
       dup src_path @ptr swap !token.file // file = src_path
       dup line_pos @int swap !token.row // (row, col) = (line_pos, col_pos)
       dup col_pos  @int swap !token.col
