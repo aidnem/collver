@@ -4,6 +4,12 @@ import sys
 import glob
 import subprocess
 
+class Colors:
+    CYAN = '\u001b[36m'
+    GREEN = '\u001b[32m'
+    RED = '\u001b[31m'
+    RESET = '\u001b[0m'
+
 @dataclass
 class TestSpec:
     """A collver Test Specification, containing input and expected outputs"""
@@ -103,7 +109,7 @@ class Problem:
     actual: str   # The actual value
 
 def print_problem(prob: Problem):
-    print(f"Spec {prob.specpath}: {prob.field} didn't match!")
+    print(f"Spec {prob.specpath}: {Colors.RED}{prob.field}{Colors.RESET} didn't match!")
     print(f">> Expected:\n"+ prob.expected)
     print(f">> Actual:\n"+ prob.actual)
 
@@ -204,7 +210,7 @@ def main():
                 specs.extend(find_specfiles("std"))
             else:
                 specs = find_specfiles(subcommand)
-            print(f"==> Found {len(specs)} spec(s)")
+            print(f"==> Found {Colors.CYAN}{len(specs)}{Colors.RESET} spec(s)")
             probs = []
             for spec in specs:
                 print(f"<INFO> Testing spec `{spec}`")
@@ -213,7 +219,7 @@ def main():
                 if "-clean" in sys.argv:
                     clean_spec(spec, quiet=True)
 
-            print(f"==> {len(specs)} spec(s) tested; {len(probs)} failed")
+            print(f"==> {Colors.CYAN}{len(specs)}{Colors.RESET} spec(s) tested; {Colors.RED}{len(probs)}{Colors.RESET} failed")
             for prob in probs:
                 print_problem(prob)
         case "clean":
@@ -225,5 +231,5 @@ def main():
             print(f"ERROR: Unknown subcommand `{subcommand}`")
             sys.exit(1)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
