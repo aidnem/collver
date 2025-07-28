@@ -1,23 +1,64 @@
+extern intrinsic_plus int int -> int end
 alias + intrinsic_plus end
+
+extern intrinsic_minus int int -> int end
 alias - intrinsic_minus end
+
+extern intrinsic_mult int int -> int end
 alias * intrinsic_mult end
+
+extern intrinsic_div int int -> int end
 alias / intrinsic_div end
+
+extern intrinsic_mod int int -> int end
 alias % intrinsic_mod end
+
+extern intrinsic_eq int int -> int end
 alias = intrinsic_eq end
+
+extern intrinsic_ne int int -> int end
 alias != intrinsic_ne end
+
+extern intrinsic_gt int int -> int end
 alias > intrinsic_gt end
+
+extern intrinsic_lt int int -> int end
 alias < intrinsic_lt end
+
+extern intrinsic_ge int int -> int end
 alias >= intrinsic_ge end
+
+extern intrinsic_le int int -> int end
 alias <= intrinsic_le end
+
+extern intrinsic_band int int -> int end
 alias & intrinsic_band end
+
+extern intrinsic_bor int int -> int end
 alias | intrinsic_bor end
+
+extern intrinsic_bxor int int -> int end
 alias ^ intrinsic_bxor end
+
+extern intrinsic_shl int int -> int end
 alias << intrinsic_shl end
+
+extern intrinsic_shr int int -> int end
 alias >> intrinsic_shr end
+
+extern intrinsic_dup int -> int int end
 alias dup intrinsic_dup end
+
+extern intrinsic_drop int -> end
 alias drop intrinsic_drop end
+
+extern intrinsic_store8 int int -> end
 alias !8 intrinsic_store8 end
+
+extern intrinsic_load8 int -> int end
 alias @8 intrinsic_load8 end
+
+extern intrinsic_sotre8 
 alias !byte intrinsic_store8 end
 alias @byte intrinsic_load8 end
 alias !64 intrinsic_store64 end

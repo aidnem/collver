@@ -26,4 +26,6 @@ proc main
   vec1 vec2 vec_extend
 
   vec1 vec_print_int
+
+  1 vec1 vec_elem @int print
 end

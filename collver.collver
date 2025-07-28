@@ -123,7 +123,7 @@ end
 
 proc token_print_vec // ptr ->
   // Pretty-print a vector of tokens
-  dup vec_dbg
+  // dup vec_dbg // DEBUG POINT
   memory vec_ptr sizeof(ptr) end
   vec_ptr !ptr
   "[" puts
@@ -133,6 +133,55 @@ proc token_print_vec // ptr ->
     1 +
   end
   "]\n" puts
+end
+
+proc pretty_loc // ptr ->
+  // Given a token, pretty-print its location TO STDERR WITH NO NEWLINE
+  memory token sizeof(token) end
+  sizeof(token) swap token memcpy
+
+  token @token.file eputs ":" eputs
+  token @token.row 1 + eputn ":" eputs
+  token @token.col 1 + eputn ":" eputs
+end
+
+proc compiler_warning // ptr tok, ptr msg ->
+  // Given a token and a message, print a warning at a location to stderr. DOES NOT EXIT AUTOMATICALLY
+  memory token_ptr sizeof(ptr) end
+  memory msg_ptr sizeof(ptr) end
+
+  msg_ptr !ptr
+  token_ptr !ptr
+
+  token_ptr @ptr pretty_loc
+  ":warning: " eputs
+  msg_ptr @ptr eputs "\n" eputs
+end
+
+proc compiler_error // ptr tok, ptr msg ->
+  // Given a token and a message, print a error at a location to stderr. DOES NOT EXIT AUTOMATICALLY
+  memory token_ptr sizeof(ptr) end
+  memory msg_ptr sizeof(ptr) end
+
+  msg_ptr !ptr
+  token_ptr !ptr
+
+  token_ptr @ptr pretty_loc
+  ":error: " eputs
+  msg_ptr @ptr eputs "\n" eputs
+end
+
+proc compiler_note // ptr tok, ptr msg ->
+  // Given a token and a message, print a note at a location to stderr. DOES NOT EXIT AUTOMATICALLY
+  memory token_ptr sizeof(ptr) end
+  memory msg_ptr sizeof(ptr) end
+
+  msg_ptr !ptr
+  token_ptr !ptr
+
+  token_ptr @ptr pretty_loc
+  ":note: " eputs
+  msg_ptr @ptr eputs "\n" eputs
 end
 
 proc lex_file // ptr src_path, ptr tok_vec ->
@@ -366,7 +415,7 @@ proc lex_file // ptr src_path, ptr tok_vec ->
       dup line_pos @int swap !token.row // (row, col) = (line_pos, col_pos)
       dup col_pos  @int swap !token.col
       dup tok_vec  @ptr vec_push // push it to the vector
-      dup token_print "\n" puts
+      // dup token_print "\n" puts // DEBUG POINT
       free // free the original token struct
 
       0 lexbufsz !int // Reset the lex buffer size to 0
@@ -376,11 +425,77 @@ proc lex_file // ptr src_path, ptr tok_vec ->
     line_pos inc64
   end
 
-  line_vec vec_print_str
+  // DEBUG POINT
+  // line_vec vec_print_str
   tok_vec @ptr token_print_vec
-  line_vec vec_free
-  tok_vec @ptr vec_free
+  // line_vec vec_free
+  // tok_vec @ptr vec_free
   bufptr @ptr free
+end
+
+proc preprocess_includes // ptr toks ->
+  // Given a pointer to a vector of tokens, preprocess all `include "[file]"` directives
+  memory orig_toks_ptr sizeof(ptr) end // Pointer to the original tokens vec
+  memory orig_toks_cpy sizeof(vec) end // Copy of the original tokens vec
+  memory new_toks sizeof(vec) end // Vector for new tokens
+  memory included_files sizeof(vec) end // List of files that are already included (avoid dependency loop)
+
+  orig_toks_ptr !ptr // Save the argument for future use
+
+  // Copy the vector struct for easier use within this procedure
+  sizeof(vec) orig_toks_ptr @ptr orig_toks_cpy memcpy // Copy the vec struct from the original location to our copy
+
+  sizeof(token) new_toks vec_init // Initialize the new vector of tokens (vec of tokens, so use sizeof(token))
+  sizeof(ptr) included_files vec_init // Initialize the vector of included files (vec of strings, so use sizeof(ptr))
+
+  memory i sizeof(int) end // Iterator for iterating over the tokens
+  0 i !int
+  while i @int orig_toks_cpy @vec.count < do
+    i @int orig_toks_cpy vec_elem // Get the current item of `orig_toks_cpy`
+    if
+      dup // Duplicate the pointer for later
+      @token.type TT_WORD = // Check if it is a `word` token
+      over @token.value "include" streq // Check if its value is "include"
+      land // Must be a TT_WORD and it must be "include"
+    do
+      i inc64 // Increment i
+      if i @int orig_toks_cpy @vec.count < do
+        drop // Drop pointer to `include` word from earlier
+        i @int orig_toks_cpy vec_elem // Get the current item of `orig_toks_cpy` (the next word after `include`)
+        if
+          dup
+          @token.type TT_STRING =
+        do
+          memory included_toks sizeof(vec) end
+          "Including file '" puts
+          @token.value
+          dup puts
+          "'. Good luck!\n" puts
+          sizeof(token) included_toks vec_init
+          here eputs ": TODO: Correctly formed include handling is not yet implemented\n" eputs 1 exit
+        else
+          // Expected a string, so we print an error
+          // Token is already on top of the stack, so we just need to add the string and then call `compiler_error`
+
+          "\n" puts
+          token_print
+          "\n" puts
+          here eputs ": TODO: Put error message for non-string word after `include` word\n" eputs 1 exit
+        end
+      else
+        // Expected a string, so we print an error
+        // Token is already on top of the stack, so we just need to add the string and then call `compiler_error`
+        "Expected string (name of included file), found EOF" compiler_error 1 exit
+      end
+    else
+      i @int orig_toks_cpy vec_elem new_toks vec_push // Push it to the new vector
+    end
+    i inc64
+  end
+
+  // Copy the vector struct back from our ease-of-use location to the mutable pointer passed to the function as an argument
+  sizeof(vec) orig_toks_cpy orig_toks_ptr @ptr memcpy // Copy the vec struct from our copy back to the original struct location
+  // here eputs ": TODO: make sure to copy `orig_toks_cpy` back to `orig_toks_ptr` at the end!!\n" eputs 1 exit // I THINK I DID THIS ABOVE??
 end
 
 proc remove_ext // ptr -> ptr
@@ -462,6 +577,8 @@ proc main
     "[INFO] Compiling file " puts src_path @ptr puts "\n" puts
     src_path @ptr toks lex_file // Pass src_path and pointer to the token vector to `lex_file` proc
   end
+
+  toks preprocess_includes
 
   here puts ": TODO: Implement collver\n" puts 1 exit
 end
