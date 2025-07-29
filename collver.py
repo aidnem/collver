@@ -70,7 +70,6 @@ class DT(Enum):
     """A pointer to anything that isn't a string"""
     UNK = auto()
     """A type that has yet to be determined by the compiler"""
-    
 
 
 TypeAnnotation = tuple[DT, Token]
@@ -89,7 +88,7 @@ DATATYPE_TO_STR: dict[DT, str] = {
     DT.INT: "int",
     DT.STR: "str",
     DT.PTR: "ptr",
-    DT.UNK: "unknown"
+    DT.UNK: "unknown",
 }
 
 
@@ -463,10 +462,14 @@ class ProcTypeSig:
         """Return type sig as a tuple of (args, returns)"""
         return (self.args, self.returns)
 
-
     def pretty_print(self) -> str:
         """Pretty-print type signature as `arg arg arg -> return return return`"""
-        return ' '.join([DATATYPE_TO_STR[arg[0]] for arg in self.args]) + " -> " + ' '.join([DATATYPE_TO_STR[ret[0]] for ret in self.returns])
+        return (
+            " ".join([DATATYPE_TO_STR[arg[0]] for arg in self.args])
+            + " -> "
+            + " ".join([DATATYPE_TO_STR[ret[0]] for ret in self.returns])
+        )
+
 
 @dataclass
 class Proc:
@@ -497,8 +500,8 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
     assert len(OT) == 9, "Exhaustive handling of Op Types in parse_tokens_into_words()"
     rtokens = list(reversed(tokens))
     words: list[Word] = []
-    extern_procs: list[str] = []
     proc_names: list[str] = []
+    extern_names: list[str] = []
     mem_names: list[str] = []
     while len(rtokens):
         tok = rtokens.pop()
@@ -527,6 +530,13 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
                 else:
                     compiler_error(tok, "Expected name of proc")
                     sys.exit(1)
+            elif len(words) and words[-1].operand == Keyword.EXTERN:
+                if tok.typ == TT.WORD:
+                    words.append(Word(OT.PROC_NAME, tok.value, tok, None))
+                    extern_names.append(str(tok.value))
+                else:
+                    compiler_error(tok, "Expected name of extern")
+                    sys.exit(1)
             elif len(words) and words[-1].operand == Keyword.MEMORY:
                 if tok.typ == TT.WORD:
                     words.append(Word(OT.MEMORY_NAME, tok.value, tok, None))
@@ -543,12 +553,12 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
                     str(tok.value).startswith("intrinsic_")
                     or str(tok.value).startswith("ll_")
                 ):
-                    compiler_warning(
+                    compiler_error(tok, f"Unknown word `{tok.value}`")
+                    compiler_note(
                         tok,
-                        f"Unknown word `{tok.value}`, treating it like an external proc call",
+                        "Externs can no longer be inferred due to typechecking as of 07-29-2025",
                     )
-                words.append(Word(OT.PROC_CALL, tok.value, tok, None))
-                extern_procs.append(str(tok.value))
+                    sys.exit(1)
         else:
             assert False, f"Unkown token type {tok.typ}"
 
@@ -640,9 +650,9 @@ def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig
 
     if len(rwords) == 0:
         compiler_error(
-                proc_name_word.tok,
-                f"Expected a data type or `->` keyword, found EOF",
-            )
+            proc_name_word.tok,
+            f"Expected a data type or `->` keyword, found EOF",
+        )
         sys.exit(1)
 
     while len(rwords):
@@ -654,15 +664,15 @@ def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig
             break
         else:
             compiler_error(
-                    word.tok,
-                    f"Expected a data type or `->` keyword, found `{word.operand}`",
-                    )
+                word.tok,
+                f"Expected a data type or `->` keyword, found `{word.operand}`",
+            )
 
     if word.operand != Keyword.ARROW:
         compiler_error(
-                word.tok,
-                f"Expected `->` keyword at end of proc argument type signature, found nothing",
-                )
+            word.tok,
+            f"Expected `->` keyword at end of proc argument type signature, found nothing",
+        )
         sys.exit(1)
 
     arrow_tok = word.tok
@@ -676,17 +686,16 @@ def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig
             break
         else:
             compiler_error(
-                    word.tok,
-                    f"Expected a data type or `do` keyword, found `{word.operand}`",
-                    )
+                word.tok,
+                f"Expected a data type or `do` keyword, found `{word.operand}`",
+            )
 
     if word.operand != Keyword.DO:
         compiler_error(
-                word.tok,
-                f"Expected `do` keyword at end of proc return type signature, found nothing",
-                )
+            word.tok,
+            f"Expected `do` keyword at end of proc return type signature, found nothing",
+        )
         sys.exit(1)
-
 
     return ProcTypeSig(types_in_buf, types_out_buf, arrow_tok)
 
@@ -708,7 +717,7 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                     "`proc` keyword followed by non-proc_name word (compiler bug)"
                 )
             else:
-                compiler_error(word.tok, f"Expected name of proc, found nothing")
+                compiler_error(word.tok, "Expected name of proc, found nothing")
                 sys.exit(1)
 
             type_sig = parse_proc_type_sig(name_word, rwords)
@@ -761,9 +770,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
             local_mem_size: int = eval_memory_size(rwords, extern_name_word)
             program.memories[extern_name] = local_mem_size
         elif word.typ == OT.KEYWORD and word.operand == Keyword.EXTERN:
-            # TODO: Use new parse proc type sig function
-            # Make it add to the list of extern overloads
-            # Next TODO: Let it typecheck externs by going over the list to see what fits.
             if len(rwords):
                 extern_name_word = rwords.pop()
             else:
@@ -772,23 +778,34 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 
             extern_name = str(extern_name_word.operand)
 
-            mem_size: int = eval_memory_size(rwords, extern_name_word)
-            program.memories[extern_name] = mem_size
+            type_sig = parse_proc_type_sig(extern_name_word, rwords)
+
+            # Create a new entry in the externs if it didn't previously exist
+            if extern_name not in program.externs:
+                program.externs[extern_name] = []
+
+            # Then add this type signature to the list
+            program.externs[extern_name].append(type_sig)
         else:
-            compiler_error(word.tok, f"Expected `proc` or `memory` keywords")
+            compiler_error(word.tok, "Expected `proc` or `memory` keywords")
             sys.exit(1)
 
     return program
 
 
-def test_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation], should_error: bool = False) -> bool:
+def test_proc_type_sig(
+    type_sig: ProcTypeSig, type_stack: list[TypeAnnotation], should_error: bool = False
+) -> bool:
     """Test whether or not a procedure type signature matches the top items on the type stack."""
     arguments: list[TypeAnnotation]
     arguments, _ = type_sig.as_tuple()
 
     if len(arguments) > len(type_stack):
         if should_error:
-            compiler_error(arguments[0][1], f"Expected {len(arguments)} arguments but found only {len(type_stack)}")
+            compiler_error(
+                arguments[0][1],
+                f"Expected {len(arguments)} arguments but found only {len(type_stack)}",
+            )
             sys.exit(1)
         return False
 
@@ -797,7 +814,10 @@ def test_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation], 
     for idx, arg in enumerate(rarguments):
         if type_stack[-idx][0] != arg[0]:
             if should_error:
-                compiler_error(type_stack[-idx][1], f"Expected {arg[0]} but found {type_stack[-idx][0]} as argument {len(arguments) - idx} of procedure.")
+                compiler_error(
+                    type_stack[-idx][1],
+                    f"Expected {arg[0]} but found {type_stack[-idx][0]} as argument {len(arguments) - idx} of procedure.",
+                )
                 compiler_note(arg[1], "Type signature defined here")
                 sys.exit(1)
             return False
@@ -811,7 +831,9 @@ def apply_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation])
 
     This assumes that the type sig is possible. test_proc_type_sig() MUST return true before this is called.
     """
-    assert test_proc_type_sig(type_sig, type_stack), "test_proc_type_sig not successful when apply_proc_type_sig was called (compiler bug)"
+    assert test_proc_type_sig(type_sig, type_stack), (
+        "test_proc_type_sig not successful when apply_proc_type_sig was called (compiler bug)"
+    )
 
     arguments: list[TypeAnnotation]
     returns: list[TypeAnnotation]
@@ -822,6 +844,7 @@ def apply_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation])
         _ = type_stack.pop()
 
     type_stack.extend(returns)
+
 
 def type_check_proc(name: str, proc: Proc, program: Program):
     """Typecheck a procedure"""
@@ -857,21 +880,48 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                         apply_proc_type_sig(type_sig, type_stack)
 
                 if not found_match:
-                    compiler_error(word.tok, f"Incompatible types found for call to extern proc {word.operand}")
+                    compiler_error(
+                        word.tok,
+                        f"Incompatible types found for call to extern proc {word.operand}",
+                    )
                     compiler_note(word.tok, "Expected one of:")
                     for type_sig in type_sigs:
-                        compiler_note(type_sig.arrow_tok, f"defined here: {type_sig.pretty_print()}")
+                        compiler_note(
+                            type_sig.arrow_tok,
+                            f"defined here: {type_sig.pretty_print()}",
+                        )
                     sys.exit(1)
-        elif word.typ == OT.KEYWORD and word.operand in (Keyword.IF, Keyword.ELIF, Keyword.ELSE, Keyword.WHILE):
+            else:
+                compiler_warning(
+                    word.tok,
+                    f"Proc call made to undefined proc {word.operand}, therefore proc {name} cannot be typechecked.",
+                )
+                compiler_note(
+                    word.tok,
+                    "Typechecking will continue as if the procedure was found to be safe.",
+                )
+                return
+        elif word.typ == OT.KEYWORD and word.operand in (
+            Keyword.IF,
+            Keyword.ELIF,
+            Keyword.ELSE,
+            Keyword.WHILE,
+        ):
             assert False, "Not implemented :("
         else:
             assert False, f"Word {word} not implemented"
 
     if len(returns) != len(type_stack):
-        compiler_error(proc.proc_tok, f"Process supposed to return {len(returns)} values, actually returned {len(type_stack)}.")
-        compiler_note(proc.proc_tok, f"Expected {', '.join([str(r[0]) for r in returns])}, found {', '.join([str(t[0]) for t in type_stack])}")
+        compiler_error(
+            proc.proc_tok,
+            f"Process supposed to return {len(returns)} values, actually returned {len(type_stack)}.",
+        )
+        compiler_note(
+            proc.proc_tok,
+            f"Expected {', '.join([str(r[0]) for r in returns])}, found {', '.join([str(t[0]) for t in type_stack])}",
+        )
         if len(type_stack) > len(returns):
-            for (erroneous_type, loc) in type_stack:
+            for erroneous_type, loc in type_stack:
                 compiler_note(loc, f"{erroneous_type} originated here")
         sys.exit(1)
 
@@ -881,12 +931,11 @@ def type_check_program(program: Program):
     for proc in program.procs:
         type_check_proc(proc, program.procs[proc], program)
 
+
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
     assert len(OT) == 8, "Exhaustive handling of Op Types in crossreference_proc()"
-    assert len(Keyword) == 8, (
-        "Exhaustive handling of Keywords in crossreference_proc()"
-    )
+    assert len(Keyword) == 8, "Exhaustive handling of Keywords in crossreference_proc()"
     stack: list[int] = []
     for ip, word in enumerate(proc.words):
         if word.typ == OT.KEYWORD:
@@ -928,10 +977,7 @@ def crossreference_proc(proc: Proc) -> None:
                 sys.exit(1)
 
             start_word = proc.words[start_ip]
-            if (
-                start_word.operand == Keyword.IF
-                or start_word.operand == Keyword.ELIF
-            ):
+            if start_word.operand == Keyword.IF or start_word.operand == Keyword.ELIF:
                 word.jmp = ip
             else:
                 compiler_error(
@@ -967,6 +1013,7 @@ def crossreference_proc(proc: Proc) -> None:
                 sys.exit(1)
 
             proc.words[do_ip].jmp = ip
+
 
 if len(stack) != 0:
     compiler_error(proc.words[stack.pop()].tok, f"Unclosed block")
@@ -1148,7 +1195,7 @@ def compile_program_to_ll(program: Program, out_file_path: str):
     print(f"[INFO] Generating {out_file_path}")
     with open(out_file_path, "w+") as out:
         compile_push_pop_functions(out)
-        compile_extern_procs(out, program.extern_procs)
+        compile_extern_procs(out, list(program.externs.keys()))
         compile_global_memories(out, program.memories)
         found_main = False
         for proc_name in program.procs:
