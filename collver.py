@@ -10,7 +10,7 @@ import os
 import sys
 
 
-def run_echoed(cmd):
+def run_echoed(cmd: list[str]):
     print(f"[CMD] {' '.join(cmd)}")
     return subprocess.run(cmd)
 
@@ -36,7 +36,7 @@ class OT(Enum):
     PUSH_INT = auto()
     PUSH_STR = auto()
     KEYWORD = auto()
-    VALUE_TYPE = auto()
+    DATA_TYPE = auto()
     MEMORY_NAME = auto()
     PUSH_MEMORY = auto()
     PROC_NAME = auto()
@@ -64,53 +64,34 @@ class DT(Enum):
 
     INT = auto()
     """Any value that isn't a pointer"""
-    INST = auto()
-    """A special kind of pointer to the location of a struct instance"""
     STR = auto()
     """A special kind of pointer to the beginning of a null-terminated string"""
     PTR = auto()
     """A pointer to anything that isn't a string"""
+    UNK = auto()
+    """A type that has yet to be determined by the compiler"""
+    
 
 
-@dataclass
-class VT:
-    """The type of a value in collver"""
-
-    dt: DT
-    """The type of the value"""
-    pointee: VT | str | None
-    """
-    The type that is pointed to by the value
-    - If the type is a primitive, this is None
-    - If the type is an instance, this is the name of the struct
-    - If the type is a pointer, this is the Value Type it points to
-    """
-
-
-TypeAnnotation = tuple[VT, Token]
+TypeAnnotation = tuple[DT, Token]
 
 assert len(DT) == 4, "Exhaustive handling of DataTypes in STR_TO_DATATYPE"
 STR_TO_DATATYPE: dict[str, DT] = {
     "int": DT.INT,
     "str": DT.STR,
+    "ptr": DT.PTR,
+    "unk": DT.UNK,
 }
 
 
-def try_parse_valuetype(word: str) -> VT | None:
-    """Try parsing a string into a valuetype, returning None if it is invalid"""
+def try_parse_datatype(word: str) -> DT | None:
+    """Try parsing a string into a data type, returning None if it is invalid"""
 
     # If it's a primitive, return it
     if word in STR_TO_DATATYPE:
-        return VT(STR_TO_DATATYPE[word], None)
-    # If it's a struct instance, return it
-    elif word[0] == "#":
-        struct_name = word[1:]
-        return VT(DT.INST, struct_name)
-    # If it's a pointer, try parsing it down a layer
-    elif word.startswith("ptr:"):
-        if (next_try := try_parse_valuetype(word[4:])) is not None:
-            return VT(DT.PTR, next_try)
+        return STR_TO_DATATYPE[word]
 
+    # Otherwise, not a data type
     return None
 
 
@@ -119,7 +100,7 @@ class Word:
     """A word (instruction) in Collver"""
 
     typ: OT  # Type of token (for different syntaxes)
-    operand: Optional[int | str | Keyword | VT]  # Value or type of keyword/intrinsic
+    operand: Optional[int | str | Keyword | DT]  # Value or type of keyword/intrinsic
     tok: Token  # Token that the word was derived from
     jmp: Optional[int]  # Jump location for control flow words
 
@@ -466,6 +447,7 @@ class ProcTypeSig:
     args: list[TypeAnnotation]
     returns: list[TypeAnnotation]
 
+    # Allow destructuring of ProcTypeSigs by turning itself into a tuple
     def __iter__(self):
         return iter(astuple(self))
 
@@ -482,22 +464,17 @@ class Proc:
 
 
 @dataclass
-class MemoryDef:
-    """Definition for local memory"""
-
-    vt: TypeAnnotation
-    size: int
-
-
-@dataclass
 class Program:
     """A program in intermediate representation"""
 
     file_path: str
     procs: dict[str, Proc]
-    externs: dict[str, ProcTypeSig]
+    # Externs can be overloaded to allow for type-safe pointer math
+    # E.g.
+    #   int + int -> int, but ptr + int -> ptr
+    externs: dict[str, list[ProcTypeSig]]
     extern_procs: list[str]
-    memories: dict[str, MemoryDef]
+    memories: dict[str, int]
 
 
 def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]:
@@ -523,9 +500,9 @@ def parse_tokens_into_words(tokens: list[Token]) -> tuple[list[Word], list[str]]
                 )
             elif (
                 isinstance(tok.value, str)
-                and (vt := try_parse_valuetype(tok.value)) is not None
+                and (vt := try_parse_datatype(tok.value)) is not None
             ):
-                words.append(Word(OT.VALUE_TYPE, vt, tok, None))
+                words.append(Word(OT.DATA_TYPE, vt, tok, None))
             elif tok.value == "here":
                 words.append(Word(OT.PUSH_STR, pretty_loc(tok), tok, None))
             elif len(words) and words[-1].operand == Keyword.PROC:
@@ -639,14 +616,70 @@ def get_strings(words: list[Word]) -> dict[int, str]:
     return strings
 
 
+def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig:
+    types_in_buf: list[TypeAnnotation] = []
+    types_out_buf: list[TypeAnnotation] = []
+
+    # Initialize word to avoid possibly unbound issues
+    word: Word = proc_name_word
+
+    if len(rwords) == 0:
+        compiler_error(
+                proc_name_word.tok,
+                f"Expected a data type or `->` keyword, found EOF",
+            )
+        sys.exit(1)
+
+    while len(rwords):
+        word = rwords.pop()
+
+        if word.typ == OT.DATA_TYPE and type(word.operand) == DT:
+            types_in_buf.append((word.operand, word.tok))
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.ARROW:
+            break
+        else:
+            compiler_error(
+                    word.tok,
+                    f"Expected a data type or `->` keyword, found `{word.operand}`",
+                    )
+
+    if word.operand != Keyword.ARROW:
+        compiler_error(
+                word.tok,
+                f"Expected `->` keyword at end of proc argument type signature, found nothing",
+                )
+        sys.exit(1)
+
+    while len(rwords):
+        word = rwords.pop()
+
+        if word.typ == OT.DATA_TYPE and type(word.operand) == DT:
+            types_out_buf.append((word.operand, word.tok))
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.DO:
+            break
+        else:
+            compiler_error(
+                    word.tok,
+                    f"Expected a data type or `do` keyword, found `{word.operand}`",
+                    )
+
+    if word.operand != Keyword.DO:
+        compiler_error(
+                word.tok,
+                f"Expected `do` keyword at end of proc return type signature, found nothing",
+                )
+        sys.exit(1)
+
+
+    return ProcTypeSig(types_in_buf, types_out_buf)
+
+
 def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     """Parse a series of words into a Program() object"""
     program = Program(file_path, {}, {}, [], {})
     rwords = list(reversed(words))
-    types_in_buf: list[TypeAnnotation] = []
-    types_out_buf: list[TypeAnnotation] = []
     word_buf: list[Word] = []
-    mem_buf: dict[str, MemoryDef] = {}
+    mem_buf: dict[str, int] = {}
     nesting_depth = 0
     while len(rwords):
         word = rwords.pop()
@@ -661,47 +694,7 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                 compiler_error(word.tok, f"Expected name of proc, found nothing")
                 sys.exit(1)
 
-            while len(rwords):
-                word = rwords.pop()
-
-                if word.typ == OT.VALUE_TYPE and type(word.operand) == VT:
-                    types_in_buf.append((word.operand, word.tok))
-                elif word.typ == OT.KEYWORD and word.operand == Keyword.ARROW:
-                    break
-                else:
-                    compiler_error(
-                        word.tok,
-                        f"Expected a data type or `->` keyword, found `{word.operand}`",
-                    )
-
-            if word.operand != Keyword.ARROW:
-                compiler_error(
-                    word.tok,
-                    f"Expected `->` keyword at end of proc argument type signature, found nothing",
-                )
-                sys.exit(1)
-
-            while len(rwords):
-                word = rwords.pop()
-
-                if word.typ == OT.VALUE_TYPE and type(word.operand) == VT:
-                    types_out_buf.append((word.operand, word.tok))
-                elif word.typ == OT.KEYWORD and word.operand == Keyword.DO:
-                    break
-                else:
-                    compiler_error(
-                        word.tok,
-                        f"Expected a data type or `do` keyword, found `{word.operand}`",
-                    )
-
-            if word.operand != Keyword.DO:
-                compiler_error(
-                    word.tok,
-                    f"Expected `do` keyword at end of proc return type signature, found nothing",
-                )
-                sys.exit(1)
-
-            type_sig = ProcTypeSig(types_in_buf, types_out_buf)
+            type_sig = parse_proc_type_sig(name_word, rwords)
 
             while len(rwords):
                 word = rwords.pop()
@@ -714,18 +707,9 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                         )
                         sys.exit(1)
 
-                    if len(rwords) and (word:=rwords.pop()).typ == OT.VALUE_TYPE:
-                        assert isinstance(word.operand, VT), "Non-VT operand of VALUE_TYPE word (compiler bug)"
-                        type_annotation: TypeAnnotation = (word.operand, word.tok)
-                    else:
-                        compiler_error(
-                            word.tok, "Expected value type of memory"
-                        )
-                        sys.exit(1)
-
                     extern_name = str(extern_name_word.operand)
 
-                    mem_buf[extern_name] = MemoryDef(type_annotation, eval_memory_size(rwords, extern_name_word))
+                    mem_buf[extern_name] = eval_memory_size(rwords, extern_name_word)
                     continue
                 elif word.typ == OT.KEYWORD and word.operand in BLOCK_STARTERS:
                     nesting_depth += 1
@@ -759,9 +743,12 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 
             extern_name = str(extern_name_word.operand)
 
-            mem_size: int = eval_memory_size(rwords, extern_name_word)
-            program.memories[extern_name] = mem_size
+            local_mem_size: int = eval_memory_size(rwords, extern_name_word)
+            program.memories[extern_name] = local_mem_size
         elif word.typ == OT.KEYWORD and word.operand == Keyword.EXTERN:
+            # TODO: Use new parse proc type sig function
+            # Make it add to the list of extern overloads
+            # Next TODO: Let it typecheck externs by going over the list to see what fits.
             if len(rwords):
                 extern_name_word = rwords.pop()
             else:
@@ -782,19 +769,28 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
 def type_check_proc(name: str, proc: Proc):
     """Typecheck a procedure"""
     type_stack: list[TypeAnnotation] = []
+    arguments: list[TypeAnnotation]
+    returns: list[TypeAnnotation]
     arguments, returns = proc.type_sig
     for arg_type in arguments:
         type_stack.append(arg_type)
 
-        for word in proc.words:
-            if word.typ == OT.PUSH_INT:
-                type_stack.append((VT(DT.INT, None), word.tok))
-            elif word.typ == OT.PUSH_STR:
-                type_stack.append((VT(DT.STR, None), word.tok))
-            elif word.typ == OT.PUSH_MEMORY:
-                type_stack.append((VT(DT.PTR, word.tok))
-            elif word.typ == OT.KEYWORD and word.operand == Keyword.IF:
-                assert False, "Not implemented :("
+    for word in proc.words:
+        if word.typ == OT.PUSH_INT:
+            type_stack.append((DT.INT, word.tok))
+        elif word.typ == OT.PUSH_STR:
+            type_stack.append((DT.STR, word.tok))
+        elif word.typ == OT.PUSH_MEMORY:
+            type_stack.append((DT.PTR, word.tok))
+        elif word.typ == OT.KEYWORD and word.operand in (Keyword.IF, Keyword.ELIF, Keyword.ELSE, Keyword.WHILE):
+            assert False, "Not implemented :("
+
+    if len(returns) != len(type_stack):
+        compiler_error(proc.proc_tok, f"Process supposed to return {len(returns)} values, actually returned {len(type_stack)}.")
+        if len(type_stack) > len(returns):
+            for (erroneous_type, loc) in type_stack:
+                compiler_note(loc, f"{erroneous_type} originated here")
+
 
 def type_check_program(program: Program):
     """Typecheck a program"""
