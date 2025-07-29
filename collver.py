@@ -80,7 +80,16 @@ STR_TO_DATATYPE: dict[str, DT] = {
     "int": DT.INT,
     "str": DT.STR,
     "ptr": DT.PTR,
-    "unk": DT.UNK,
+    "unknown": DT.UNK,
+}
+
+
+assert len(DT) == 4, "Exhaustive handling of DataTypes in DATATYPE_TO_STR"
+DATATYPE_TO_STR: dict[DT, str] = {
+    DT.INT: "int",
+    DT.STR: "str",
+    DT.PTR: "ptr",
+    DT.UNK: "unknown"
 }
 
 
@@ -446,11 +455,18 @@ def preprocess_aliases(tokens: list[Token]) -> list[Token]:
 class ProcTypeSig:
     args: list[TypeAnnotation]
     returns: list[TypeAnnotation]
+    # Keep track of the arrow token to have a location for type signatures that don't have any arguments or returns
+    arrow_tok: Token
 
-    # Allow destructuring of ProcTypeSigs by turning itself into a tuple
-    def __iter__(self):
-        return iter(astuple(self))
+    # This is a cleaner and more type safe way than using __iter__
+    def as_tuple(self) -> tuple[list[TypeAnnotation], list[TypeAnnotation]]:
+        """Return type sig as a tuple of (args, returns)"""
+        return (self.args, self.returns)
 
+
+    def pretty_print(self) -> str:
+        """Pretty-print type signature as `arg arg arg -> return return return`"""
+        return ' '.join([DATATYPE_TO_STR[arg[0]] for arg in self.args]) + " -> " + ' '.join([DATATYPE_TO_STR[ret[0]] for ret in self.returns])
 
 @dataclass
 class Proc:
@@ -473,7 +489,6 @@ class Program:
     # E.g.
     #   int + int -> int, but ptr + int -> ptr
     externs: dict[str, list[ProcTypeSig]]
-    extern_procs: list[str]
     memories: dict[str, int]
 
 
@@ -650,6 +665,8 @@ def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig
                 )
         sys.exit(1)
 
+    arrow_tok = word.tok
+
     while len(rwords):
         word = rwords.pop()
 
@@ -671,7 +688,7 @@ def parse_proc_type_sig(proc_name_word: Word, rwords: list[Word]) -> ProcTypeSig
         sys.exit(1)
 
 
-    return ProcTypeSig(types_in_buf, types_out_buf)
+    return ProcTypeSig(types_in_buf, types_out_buf, arrow_tok)
 
 
 def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
@@ -731,8 +748,6 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
                 proc_tok, mem_buf, type_sig, strings, word_buf
             )
             word_buf = []
-            types_in_buf = []
-            types_out_buf = []
             mem_buf = {}
         elif word.typ == OT.KEYWORD and word.operand == Keyword.MEMORY:
             if len(rwords):
@@ -766,12 +781,54 @@ def parse_words_into_program(file_path: str, words: list[Word]) -> Program:
     return program
 
 
-def type_check_proc(name: str, proc: Proc):
+def test_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation], should_error: bool = False) -> bool:
+    """Test whether or not a procedure type signature matches the top items on the type stack."""
+    arguments: list[TypeAnnotation]
+    arguments, _ = type_sig.as_tuple()
+
+    if len(arguments) > len(type_stack):
+        if should_error:
+            compiler_error(arguments[0][1], f"Expected {len(arguments)} arguments but found only {len(type_stack)}")
+            sys.exit(1)
+        return False
+
+    rarguments = reversed(arguments)
+
+    for idx, arg in enumerate(rarguments):
+        if type_stack[-idx][0] != arg[0]:
+            if should_error:
+                compiler_error(type_stack[-idx][1], f"Expected {arg[0]} but found {type_stack[-idx][0]} as argument {len(arguments) - idx} of procedure.")
+                compiler_note(arg[1], "Type signature defined here")
+                sys.exit(1)
+            return False
+
+    return True
+
+
+def apply_proc_type_sig(type_sig: ProcTypeSig, type_stack: list[TypeAnnotation]):
+    """
+    Apply a procedure type signature (simulate running the procedure)
+
+    This assumes that the type sig is possible. test_proc_type_sig() MUST return true before this is called.
+    """
+    assert test_proc_type_sig(type_sig, type_stack), "test_proc_type_sig not successful when apply_proc_type_sig was called (compiler bug)"
+
+    arguments: list[TypeAnnotation]
+    returns: list[TypeAnnotation]
+
+    arguments, returns = type_sig.as_tuple()
+
+    for _ in arguments:
+        _ = type_stack.pop()
+
+    type_stack.extend(returns)
+
+def type_check_proc(name: str, proc: Proc, program: Program):
     """Typecheck a procedure"""
     type_stack: list[TypeAnnotation] = []
     arguments: list[TypeAnnotation]
     returns: list[TypeAnnotation]
-    arguments, returns = proc.type_sig
+    arguments, returns = proc.type_sig.as_tuple()
     for arg_type in arguments:
         type_stack.append(arg_type)
 
@@ -782,20 +839,47 @@ def type_check_proc(name: str, proc: Proc):
             type_stack.append((DT.STR, word.tok))
         elif word.typ == OT.PUSH_MEMORY:
             type_stack.append((DT.PTR, word.tok))
+        elif word.typ == OT.PROC_CALL:
+            if word.operand in program.procs:
+                assert type(word.operand) == str, "Non-str operand of PROC_CALL word"
+                proc_type_sig = program.procs[word.operand].type_sig
+                if test_proc_type_sig(proc_type_sig, type_stack, should_error=True):
+                    apply_proc_type_sig(proc_type_sig, type_stack)
+                # This will exit if it fails, so no else is needed
+            elif word.operand in program.externs:
+                assert type(word.operand) == str, "Non-str operand of PROC_CALL word"
+                type_sigs = program.externs[word.operand]
+
+                found_match = False
+                for type_sig in type_sigs:
+                    if test_proc_type_sig(type_sig, type_stack):
+                        found_match = True
+                        apply_proc_type_sig(type_sig, type_stack)
+
+                if not found_match:
+                    compiler_error(word.tok, f"Incompatible types found for call to extern proc {word.operand}")
+                    compiler_note(word.tok, "Expected one of:")
+                    for type_sig in type_sigs:
+                        compiler_note(type_sig.arrow_tok, f"defined here: {type_sig.pretty_print()}")
+                    sys.exit(1)
         elif word.typ == OT.KEYWORD and word.operand in (Keyword.IF, Keyword.ELIF, Keyword.ELSE, Keyword.WHILE):
             assert False, "Not implemented :("
+        else:
+            assert False, f"Word {word} not implemented"
 
     if len(returns) != len(type_stack):
         compiler_error(proc.proc_tok, f"Process supposed to return {len(returns)} values, actually returned {len(type_stack)}.")
+        compiler_note(proc.proc_tok, f"Expected {', '.join([str(r[0]) for r in returns])}, found {', '.join([str(t[0]) for t in type_stack])}")
         if len(type_stack) > len(returns):
             for (erroneous_type, loc) in type_stack:
                 compiler_note(loc, f"{erroneous_type} originated here")
+        sys.exit(1)
 
 
 def type_check_program(program: Program):
     """Typecheck a program"""
     for proc in program.procs:
-        type_check_proc(proc, program.procs[proc])
+        type_check_proc(proc, program.procs[proc], program)
 
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
