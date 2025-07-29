@@ -996,6 +996,21 @@ def type_check_program(program: Program):
     for proc in program.procs:
         type_check_proc(proc, program.procs[proc], program)
 
+    if "main" in program.procs:
+        main_sig = program.procs["main"].type_sig
+        if (
+            len(main_sig.args) != 2
+            or main_sig.args[0][0] != DT.INT
+            or main_sig.args[1][0] != DT.PTR
+            or len(main_sig.returns) != 1
+            or main_sig.returns[0][0] != DT.INT
+        ):
+            compiler_error(
+                main_sig.arrow_tok,
+                "`main` proc must have type signature `int ptr -> int` for (int argc, char* argv) -> int returncode",
+            )
+            sys.exit(1)
+
 
 def crossreference_proc(proc: Proc) -> None:
     """Given a set of words, set the correct index to jump to for control flow words"""
