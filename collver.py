@@ -892,12 +892,25 @@ def dbg_type_stack(type_stack: list[TypeAnnotation]):
     print("  == BOTTOM == ")
 
 
+TypeStack = list[TypeAnnotation]
+
+
+class BlockType(Enum):
+    """Types of blocks that must have consistent typing"""
+    IF_SINGLE = auto()
+    IF_MULTIPLE = auto()
+    ELIF = auto()
+    ELSE = auto()
+    WHILE = auto()
+
+
 def type_check_proc(name: str, proc: Proc, program: Program):
     """Typecheck a procedure"""
     # print("Type checking proc " + name)
     # print(f"Type signature: {proc.type_sig.pretty_print()}")
     # print(f"Has {len(proc.words)} words")
-    type_stack: list[TypeAnnotation] = []
+    type_stack: TypeStack = []
+    block_stack: list[tuple[BlockType, TypeStack]] = []
     arguments: list[TypeAnnotation]
     returns: list[TypeAnnotation]
     arguments, returns = proc.type_sig.as_tuple()
@@ -956,11 +969,14 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                     "Typechecking will continue as if the procedure was found to be safe.",
                 )
                 return
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.WHILE:
+            # The while condition may not modify the stack, since it will be run repeatedly
+            block_stack.append(type_stack.copy())
+            pass
         elif word.typ == OT.KEYWORD and word.operand in (
             Keyword.IF,
             Keyword.ELIF,
             Keyword.ELSE,
-            Keyword.WHILE,
         ):
             assert False, "Not implemented :("
         else:
@@ -1378,10 +1394,10 @@ def main():
         for proc in program.procs:
             print(f"{proc}:\n\t{program.procs[proc]}")
         type_check_program(program)
-        assert False, "We made it this far, poggers"
         for proc in program.procs:
             crossreference_proc(program.procs[proc])
 
+        assert False, "We made it this far, poggers"
         compile_program_to_ll(program, ll_path)
     if command in ("com", "from-ll"):
         compile_ll_to_bin(ll_path, exec_path)
