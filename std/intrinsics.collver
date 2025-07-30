@@ -1,5 +1,6 @@
 extern intrinsic_plus int int -> int end
 extern intrinsic_plus ptr int -> ptr end
+extern intrinsic_plus int ptr -> ptr end
 alias + intrinsic_plus end
 
 extern intrinsic_minus int int -> int end

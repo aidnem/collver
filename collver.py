@@ -888,29 +888,99 @@ def dbg_type_stack(type_stack: list[TypeAnnotation]):
     print("Type stack")
     print("  == TOP == ")
     for dt, tok in reversed(type_stack):
-        print(f"  {dt} from {tok}")
+        print(f"  {dt} from {pretty_loc(tok)}")
     print("  == BOTTOM == ")
+
+
+class TypeDifference(Enum):
+    NONE = auto()
+    FIRST_LONGER = auto()
+    SECOND_LONGER = auto()
+    MISMATCH = auto()
+
+
+def stacks_match(
+    type_stack1: list[TypeAnnotation], type_stack2: list[TypeAnnotation]
+) -> tuple[TypeDifference, tuple[Token, Token] | None]:
+    if len(type_stack1) > len(type_stack2):
+        return TypeDifference.FIRST_LONGER, None
+    elif len(type_stack1) < len(type_stack2):
+        return TypeDifference.SECOND_LONGER, None
+
+    for a, b in zip(type_stack1, type_stack2):
+        if a[0] != b[0]:
+            return TypeDifference.MISMATCH, (a[1], b[1])
+
+    return TypeDifference.NONE, None
 
 
 TypeStack = list[TypeAnnotation]
 
 
-class BlockType(Enum):
-    """Types of blocks that must have consistent typing"""
-    IF_SINGLE = auto()
+class BlockMarker(Enum):
+    """
+    Types of blocks that must have consistent typing
+
+    These are signified by the start of the block, where the stack snapshot was pushed.
+    For instance, an `if ... do ... end` would have:
+        -             ^               : IF, [] pushed to signify an IF was passed
+        -                    ^        : IF was popped and read, IF_DO pushed
+        -                           ^ : IF_DO popped, used to verify that types weren't modified
+    Similarly, `if ... do ... else ... end` would have:
+        -       ^ IF, [] pushed to signify an IF was passed
+        -              ^ IF popped and read, IF_DO pushed
+        -                     ^ IF_DO popped (if-else has multiple branches, so original state is inconsequential) and ELSE pushed
+        -                              ^ ELSE popped, snapshot is compared with current typestack state
+    Just like `if ... do ... elif ... do ... elif ... do ... else ... end`
+        -      ^ IF, [] pushed
+        -             ^ IF popped, IF_DO pushed
+        -                    ^ IF_DO popped and read, but then re-pushed because: until we know there is a final else, if-elif cannot modify types because there is no guarantee all branches will run
+        -                    ^ ELIF pushed to verify condition is type-safe
+        -                             ^ ELIF popped, compared to ensure that elif condition didn't modify stack (since it might not run, it cannot change stack types)
+        -                             ^ ELIF_DO pushed, for comparison with next branch
+        -                                    ^ ELIF_DO popped and compared with current stack state to ensure that the 2 branches had identical behavior. New ELIF pushed for condition verification.
+        -                                             ^ ELIF popped and compared to ensure condition didn't modify stack state. ELIF_DO pushed to compare with next branch.
+        -                                                    ^ ELIF_DO popped and compared with current state to make sure that the 2 branches had identical behavior.
+        -                                                    ^ Because else was found, original IF_DO is popped: else guarantees that 1 branch will always run, so state can be modified as long as each branch is consistent.
+        -                                                    ^ ELSE pushed for comparison at the very end
+        -                                                             ^ ELSE popped, snapshot is compared with current typestack state to ensure that all branches behaved the same
+    This one's a little different: `if ... do ... elif ... do ... end` cannot modify the types because there's no guarantee that any branch will run.
+        -                           ^ IF, [] pushed
+        -                                  ^ IF popped, IF_DO pushed
+        -                                         ^ IF_DO popped and read, but then re-pushed because: until we know there is a final else, if-elif cannot modify types because there is no guarantee all branches will run
+        -                                         ^ ELIF pushed to verify condition is type-safe
+        -                                                  ^ ELIF popped, compared to ensure that elif condition didn't modify stack (since it might not run, it cannot change stack types)
+        -                                                  ^ ELIF_DO pushed, for comparison with next branch
+        -                                                         ^ ELIF_DO popped and compared with current state to make sure the 2 branches had identical behavior.
+        -                                                         ^ Because ELIF_DO was found and not ELSE, the original IF_DO is also popped and compared to ensure that the branches didn't modify the types, since any branch not is guaranteed to run.
+    """
+
+    IF = auto()  # Pushed with an empty type stack to indicate that an IF was passed
+    IF_DO = auto()
     IF_MULTIPLE = auto()
     ELIF = auto()
+    ELIF_DO = auto()
     ELSE = auto()
-    WHILE = auto()
+    # TODO: support typechecking of while loops
 
 
 def type_check_proc(name: str, proc: Proc, program: Program):
-    """Typecheck a procedure"""
+    """
+    Typecheck a procedure
+
+    Typechecking follows a few simple rules:
+        - `if` statement conditions CAN modify the stack, because the first condition will always run. However, subsequent `elif ... do` conditions CANNOT since they may not run.
+        - `if ... do ... end` statements cannot modify the stack because the body may not run
+        - `if ... do ... elif ... do ... end` statements similarly cannot modify the stack because no branch's body is guaranteed to run
+        - `if ... do ... else ... end` and `if ... do ... elif ... do ... else ... end` (etc.) CAN modify the stack, because one branch is always guaranteed to run. However, all branches must be identical.
+        - `while` conditions cannot modify the stack, as the condition may run an unpredictable number of times.
+        - `while ... do ... end` statement bodies may not modify the stack, as they may run an unpredictable number of times.
+    """
     # print("Type checking proc " + name)
     # print(f"Type signature: {proc.type_sig.pretty_print()}")
     # print(f"Has {len(proc.words)} words")
     type_stack: TypeStack = []
-    block_stack: list[tuple[BlockType, TypeStack]] = []
+    block_stack: list[tuple[BlockMarker, TypeStack]] = []
     arguments: list[TypeAnnotation]
     returns: list[TypeAnnotation]
     arguments, returns = proc.type_sig.as_tuple()
@@ -969,14 +1039,23 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                     "Typechecking will continue as if the procedure was found to be safe.",
                 )
                 return
-        elif word.typ == OT.KEYWORD and word.operand == Keyword.WHILE:
-            # The while condition may not modify the stack, since it will be run repeatedly
-            block_stack.append(type_stack.copy())
-            pass
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.IF:
+            block_stack.append((BlockMarker.IF, []))
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.DO:
+            assert len(block_stack) >= 1, (
+                "`do` keyword encountered in typechecking without start of block."
+            )
+            marker, snapshot = block_stack.pop()
+            if marker == BlockMarker.IF:
+                block_stack.append((BlockMarker.IF_DO, type_stack.copy()))
+            elif marker == BlockMarker.ELIF:
+                pass
         elif word.typ == OT.KEYWORD and word.operand in (
             Keyword.IF,
             Keyword.ELIF,
             Keyword.ELSE,
+            Keyword.WHILE,
+            Keyword.END,
         ):
             assert False, "Not implemented :("
         else:
