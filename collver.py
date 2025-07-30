@@ -914,6 +914,21 @@ def stacks_match(
     return TypeDifference.NONE, None
 
 
+def compiler_type_error(diff: TypeDifference, context: str, reason: str, tok1: Token|None, tok2: Token|None, stack1: list[TypeAnnotation], stack2: list[TypeAnnotation]):
+    """
+    Print a type error!
+    """
+
+    brief: str = ""
+    if diff == TypeDifference.NONE:
+        return
+    elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
+        brief = "Number of items on the stack changes."
+
+    message = f"Type error in {context}: "
+    pass
+
+
 TypeStack = list[TypeAnnotation]
 
 
@@ -1049,7 +1064,9 @@ def type_check_proc(name: str, proc: Proc, program: Program):
             if marker == BlockMarker.IF:
                 block_stack.append((BlockMarker.IF_DO, type_stack.copy()))
             elif marker == BlockMarker.ELIF:
-                pass
+                diff, toks = stacks_match(snapshot, type_stack)
+                if diff != TypeDifference.NONE:
+                    pass
         elif word.typ == OT.KEYWORD and word.operand in (
             Keyword.IF,
             Keyword.ELIF,
