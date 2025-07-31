@@ -884,12 +884,11 @@ def apply_proc_type_sig(
     type_stack.extend(returns)
 
 
-def dbg_type_stack(type_stack: list[TypeAnnotation]):
-    print("Type stack")
-    print("  == TOP == ")
+def dbg_type_stack(type_stack: list[TypeAnnotation], file: TextIO=sys.stdout):
+    print("  == TOP == " file=file)
     for dt, tok in reversed(type_stack):
-        print(f"  {dt} from {pretty_loc(tok)}")
-    print("  == BOTTOM == ")
+        print(f"  {dt} from {pretty_loc(tok)}", file=file)
+    print("  == BOTTOM == ", file=file)
 
 
 class TypeDifference(Enum):
@@ -912,21 +911,6 @@ def stacks_match(
             return TypeDifference.MISMATCH, (a[1], b[1])
 
     return TypeDifference.NONE, None
-
-
-def compiler_type_error(diff: TypeDifference, context: str, reason: str, tok1: Token|None, tok2: Token|None, stack1: list[TypeAnnotation], stack2: list[TypeAnnotation]):
-    """
-    Print a type error!
-    """
-
-    brief: str = ""
-    if diff == TypeDifference.NONE:
-        return
-    elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
-        brief = "Number of items on the stack changes."
-
-    message = f"Type error in {context}: "
-    pass
 
 
 TypeStack = list[TypeAnnotation]
@@ -1065,8 +1049,13 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                 block_stack.append((BlockMarker.IF_DO, type_stack.copy()))
             elif marker == BlockMarker.ELIF:
                 diff, toks = stacks_match(snapshot, type_stack)
-                if diff != TypeDifference.NONE:
-                    pass
+                if diff == TypeDifference.MISMATCH:
+                    compiler_error(word.tok, "Mismatched types after evaluation of `elif` condition")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(toks[0], "First type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(toks[1], "Second type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
         elif word.typ == OT.KEYWORD and word.operand in (
             Keyword.IF,
             Keyword.ELIF,
