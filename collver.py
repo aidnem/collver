@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import astuple, dataclass
 from enum import Enum, auto
 from io import TextIOWrapper
-from typing import Optional
+from typing import TextIO
 import subprocess
 import os
 import sys
@@ -885,7 +885,7 @@ def apply_proc_type_sig(
 
 
 def dbg_type_stack(type_stack: list[TypeAnnotation], file: TextIO=sys.stdout):
-    print("  == TOP == " file=file)
+    print("  == TOP == ", file=file)
     for dt, tok in reversed(type_stack):
         print(f"  {dt} from {pretty_loc(tok)}", file=file)
     print("  == BOTTOM == ", file=file)
@@ -1040,6 +1040,8 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                 return
         elif word.typ == OT.KEYWORD and word.operand == Keyword.IF:
             block_stack.append((BlockMarker.IF, []))
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.ELIF:
+            pass
         elif word.typ == OT.KEYWORD and word.operand == Keyword.DO:
             assert len(block_stack) >= 1, (
                 "`do` keyword encountered in typechecking without start of block."
@@ -1056,8 +1058,11 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                     dbg_type_stack(snapshot)
                     compiler_note(toks[1], "Second type pushed here. Types on stack:")
                     dbg_type_stack(snapshot)
+                    sys.exit(1)
+                block_stack.append((BlockMarker.ELIF_DO, type_stack.copy()))
+            else:
+                assert False, f"Marker {marker} not supportd in type checking DO"
         elif word.typ == OT.KEYWORD and word.operand in (
-            Keyword.IF,
             Keyword.ELIF,
             Keyword.ELSE,
             Keyword.WHILE,
