@@ -50,9 +50,13 @@ extern intrinsic_shr int int -> int end
 alias >> intrinsic_shr end
 
 extern intrinsic_dup int -> int int end
+extern intrinsic_dup ptr -> ptr ptr end
+extern intrinsic_dup str -> str str end
 alias dup intrinsic_dup end
 
 extern intrinsic_drop int -> end
+extern intrinsic_drop ptr -> end
+extern intrinsic_drop str -> end
 alias drop intrinsic_drop end
 
 extern intrinsic_store8 int int -> end
