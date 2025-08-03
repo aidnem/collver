@@ -1096,10 +1096,38 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                 block_stack.append((BlockMarker.ELIF_DO, type_stack.copy()))
             else:
                 assert False, f"Marker {marker} not supportd in type checking DO"
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.ELSE:
+            assert len(block_stack) >= 1, "Else keyword with nothing under it in block stack"
+            marker, snapshot = block_stack.pop()
+            if marker == BlockMarker.ELIF_DO:
+                diff, toks = stacks_match(snapshot, type_stack)
+                if diff == TypeDifference.MISMATCH:
+                    compiler_error(word.tok, "Mismatched types between `elif` and `else` branches.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(toks[0], "First type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(toks[1], "Second type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "if-else statements must have consistently typed behavior since it is unknown which branch will run.")
+                    sys.exit(1)
+                elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
+                    compiler_error(word.tok, "Mismatched types between `elif` and `else` branches: differing numbers of items present on the stack in each branch.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(word.tok, "First version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "Second version of stack:")
+                    dbg_type_stack(snapshot)
+                    sys.exit(1)
+                assert len(block_stack) >= 1, "ELIF_DO on block stack without IF_DO underneath, discovered in else check"
+                marker, _ = block_stack.pop()
+                assert marker == BlockMarker.IF_DO, f"{marker} under ELIF_DO wasn't an IF_DO"
+            elif marker != BlockMarker.IF_DO:
+                assert False, "else not preceded by if or elif allowed to reach typecheck (compiler bug)"
+            block_stack.append((BlockMarker.ELSE, type_stack.copy()))
+        elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
+            assert False, "End not implemented :("
         elif word.typ == OT.KEYWORD and word.operand in (
-            Keyword.ELSE,
             Keyword.WHILE,
-            Keyword.END,
         ):
             assert False, "Not implemented :("
         else:
