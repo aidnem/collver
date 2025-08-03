@@ -887,7 +887,7 @@ def apply_proc_type_sig(
 def dbg_type_stack(type_stack: list[TypeAnnotation], file: TextIO=sys.stdout):
     print("  == TOP == ", file=file)
     for dt, tok in reversed(type_stack):
-        print(f"  {dt} from {pretty_loc(tok)}", file=file)
+        print(f"  {dt} pushed at {pretty_loc(tok)}", file=file)
     print("  == BOTTOM == ", file=file)
 
 
@@ -1041,7 +1041,33 @@ def type_check_proc(name: str, proc: Proc, program: Program):
         elif word.typ == OT.KEYWORD and word.operand == Keyword.IF:
             block_stack.append((BlockMarker.IF, []))
         elif word.typ == OT.KEYWORD and word.operand == Keyword.ELIF:
-            pass
+            assert len(block_stack) >= 1, "elif with no 'IF_DO' block in typecheck"
+            marker, snapshot = block_stack.pop()
+            if marker == BlockMarker.IF_DO:
+                block_stack.append((marker, snapshot))
+            elif marker == BlockMarker.ELIF_DO:
+                diff, toks = stacks_match(snapshot, type_stack)
+                if diff == TypeDifference.MISMATCH:
+                    compiler_error(word.tok, "Differing types of items on stack after `elif` branch.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(toks[0], "First type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(toks[1], "Second type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "All branches must result in the same types being present, as there is no guarantee of any one branch running.")
+                    sys.exit(1)
+                elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
+                    compiler_error(word.tok, "Type mismatch after `elif` branch: differing numbers of items present on the stack in each branch.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(word.tok, "First version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "Second version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "All branches must result in the same types being present, as there is no guarantee of any one branch running.")
+                    sys.exit(1)
+            else:
+                assert False, "elif with non 'IF_DO' or `ELIF_DO` block underneath in typecheck"
+            block_stack.append((BlockMarker.ELIF, type_stack.copy()))
         elif word.typ == OT.KEYWORD and word.operand == Keyword.DO:
             assert len(block_stack) >= 1, (
                 "`do` keyword encountered in typechecking without start of block."
@@ -1059,11 +1085,18 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                     compiler_note(toks[1], "Second type pushed here. Types on stack:")
                     dbg_type_stack(snapshot)
                     sys.exit(1)
+                elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
+                    compiler_error(word.tok, "Mismatched types after evaluation of `elif` condition: differing numbers of items present on the stack in each branch.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(word.tok, "First version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "Second version of stack:")
+                    dbg_type_stack(snapshot)
+                    sys.exit(1)
                 block_stack.append((BlockMarker.ELIF_DO, type_stack.copy()))
             else:
                 assert False, f"Marker {marker} not supportd in type checking DO"
         elif word.typ == OT.KEYWORD and word.operand in (
-            Keyword.ELIF,
             Keyword.ELSE,
             Keyword.WHILE,
             Keyword.END,
