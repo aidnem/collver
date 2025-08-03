@@ -956,7 +956,6 @@ class BlockMarker(Enum):
 
     IF = auto()  # Pushed with an empty type stack to indicate that an IF was passed
     IF_DO = auto()
-    IF_MULTIPLE = auto()
     ELIF = auto()
     ELIF_DO = auto()
     ELSE = auto()
@@ -1125,7 +1124,36 @@ def type_check_proc(name: str, proc: Proc, program: Program):
                 assert False, "else not preceded by if or elif allowed to reach typecheck (compiler bug)"
             block_stack.append((BlockMarker.ELSE, type_stack.copy()))
         elif word.typ == OT.KEYWORD and word.operand == Keyword.END:
-            assert False, "End not implemented :("
+            assert len(block_stack) >= 1, "End keyword with nothing under it in block stack"
+            marker, snapshot = block_stack.pop()
+            if marker == BlockMarker.IF_DO:
+                diff, toks = stacks_match(snapshot, type_stack)
+                if diff == TypeDifference.MISMATCH:
+                    compiler_error(word.tok, "Mismatched types after evaluation of `if` branch")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(toks[0], "First type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(toks[1], "Second type pushed here. Types on stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "An if-do-end statement body must not modify the types of items on the stack, since there is no guarantee that the body will execute.")
+                    sys.exit(1)
+                elif diff == TypeDifference.FIRST_LONGER or diff == TypeDifference.SECOND_LONGER:
+                    compiler_error(word.tok, "Mismatched types after evaluation of `if` branch: differing numbers of items present on the stack in each branch.")
+                    assert toks is not None, "none toks returned after mismatch from stacks_match"
+                    compiler_note(word.tok, "First version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "Second version of stack:")
+                    dbg_type_stack(snapshot)
+                    compiler_note(word.tok, "An if-do-end statement body must not modify the types of items on the stack, since there is no guarantee that the body will execute.")
+                    sys.exit(1)
+            elif marker == BlockMarker.ELIF_DO:
+                assert len(block_stack) >= 1, "elif marker with nothing under it in block stack"
+                marker, snapshot = block_stack.pop()
+                raise NotImplementedError("typechecking of elif ... end not yet implemented")
+            elif marker == BlockMarker.ELSE:
+                raise NotImplementedError("typechecking of else ... end not yet implemented")
+            else:
+                assert False, f"Unknown block marker {marker} found on block stack when typechecking `end` at {pretty_loc(word.tok)}"
         elif word.typ == OT.KEYWORD and word.operand in (
             Keyword.WHILE,
         ):
